@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase-browser";
+import { getContractRow, getContractTasks } from "@/lib/contract-tasks";
 import type { Event, Task, TaskStatus } from "@/lib/types";
 import SignOutButton from "@/app/ui/sign-out-button";
 import TaskSubmissionControls from "@/app/ui/task-submission-controls";
@@ -15,13 +16,37 @@ type Props = {
 type Sponsor = { id: string; company_name: string; tier: string; contract_details: Record<string, unknown> };
 type EditableTask = Task & { editing?: boolean };
 
-const taskSelect = "id, sponsor_event_id, title, description, category, status, due_date, quantity, input_fields, input_values, action_url, action_label, response_text, file_url, file_name, file_id, ai_recommendation, ai_feedback, ai_reviewed_at, admin_review_note";
+const taskSelect = "id, sponsor_event_id, title, description, category, status, submitted_at, due_date, quantity, input_fields, input_values, action_url, action_label, response_text, file_url, file_name, file_size_bytes, file_id, ai_recommendation, ai_feedback, ai_reviewed_at, admin_review_note";
 const statusClass: Record<TaskStatus, string> = {
   "Needs You": "badge-danger",
   "With Our Team": "badge-warning",
   Complete: "badge-success",
   Overdue: "badge-danger",
+  pending_review: "badge-warning",
 };
+
+function statusLabel(status: TaskStatus) {
+  if (status === "Complete") return "Confirmed / approved";
+  if (status === "pending_review" || status === "With Our Team") return "Submitted, awaiting your review";
+  if (status === "Overdue") return "Overdue";
+  return "Not yet started / awaiting the sponsor";
+}
+
+function categoryLabel(category: string) {
+  const value = category.toLowerCase();
+  if (value.includes("booth")) return "Booth";
+  if (value.includes("panel")) return "Panels";
+  if (value.includes("roundtable")) return "Roundtable";
+  if (value.includes("case study")) return "Case study";
+  if (value.includes("branding") || value.includes("pillar")) return "Branding";
+  if (value.includes("ticket")) return "Tickets";
+  if (value.includes("meeting")) return "Meetings";
+  if (value.includes("tour")) return "Tours";
+  if (value.includes("workshop")) return "Workshops";
+  if (value.includes("innovation")) return "Innovation";
+  if (value.includes("networking")) return "Networking";
+  return category;
+}
 
 export default function SponsorRoadmap({ eventId, sponsorId, viewingAsAdmin = false }: Props) {
   const [event, setEvent] = useState<Event | null>(null);
@@ -82,21 +107,43 @@ export default function SponsorRoadmap({ eventId, sponsorId, viewingAsAdmin = fa
         return;
       }
 
+      const sponsorData = sponsorResult.data as Sponsor;
+      const entitledTasks = getContractTasks(getContractRow(sponsorData.contract_details));
+      const entitledTitles = new Set(entitledTasks.map((task) => task.title));
+      const visibleTasks = (data ?? []).flatMap((task) => {
+        if (!entitledTitles.has(task.title)) return [];
+        const entitlement = entitledTasks.find((item) => item.title === task.title && item.category === task.category)
+          ?? entitledTasks.find((item) => item.title === task.title);
+        return entitlement ? [{
+          ...task,
+          category: entitlement.category,
+          quantity: entitlement.quantity,
+          description: task.description ?? entitlement.description,
+          action_url: task.action_url ?? entitlement.action_url ?? null,
+          action_label: task.action_label ?? entitlement.action_label ?? null,
+        }] : [task];
+      });
+
       setEvent(eventResult.data);
-      setSponsor(sponsorResult.data as Sponsor);
-      setTasks(data ?? []);
-      setReviewNotes(Object.fromEntries((data ?? []).map((task) => [task.id, task.admin_review_note ?? ""])));
+      setSponsor(sponsorData);
+      setTasks(visibleTasks);
+      setReviewNotes(Object.fromEntries(visibleTasks.map((task) => [task.id, task.admin_review_note ?? ""])));
     }
     void loadRoadmap();
   }, [eventId, sponsorId, viewingAsAdmin]);
 
   const groups = useMemo(() => tasks.reduce<Record<string, EditableTask[]>>((result, task) => {
-    (result[task.category] ??= []).push(task);
+    const category = categoryLabel(task.category);
+    (result[category] ??= []).push(task);
     return result;
   }, {}), [tasks]);
   const complete = tasks.filter((task) => task.status === "Complete").length;
-  const overdue = tasks.filter((task) => task.status === "Overdue" || (task.due_date && task.status !== "Complete" && new Date(task.due_date) < new Date())).length;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const overdue = tasks.filter((task) => task.status === "Overdue" || (task.status !== "Complete" && task.status !== "pending_review" && task.status !== "With Our Team" && task.due_date && new Date(`${task.due_date}T00:00:00`) < today)).length;
   const percentage = tasks.length ? Math.round((complete / tasks.length) * 100) : 0;
+  const awaitingReview = tasks.filter((task) => task.status === "pending_review" || task.status === "With Our Team").length;
+  const awaitingSponsor = tasks.filter((task) => task.status === "Needs You" && !(task.due_date && new Date(`${task.due_date}T00:00:00`) < today)).length;
 
   async function saveTask(task: EditableTask, formData: FormData) {
     const title = String(formData.get("title") ?? "").trim();
@@ -180,10 +227,21 @@ export default function SponsorRoadmap({ eventId, sponsorId, viewingAsAdmin = fa
         </div>
         <div className="admin-metric">
           <strong>{percentage}%</strong>
-          <small>{complete} of {tasks.length} tasks complete</small>
+          <small>{complete} of {tasks.length} confirmed</small>
           {overdue > 0 && <span className="status-badge badge-danger">{overdue} overdue</span>}
         </div>
       </section>
+      <section className="deliverable-status-summary" aria-label="Sponsor deliverable status summary">
+        <strong>{complete} of {tasks.length} confirmed</strong>
+        <span>{awaitingReview} awaiting your review</span>
+        <span>{awaitingSponsor} awaiting the sponsor</span>
+        <span className={overdue > 0 ? "status-badge badge-danger" : ""}>{overdue} overdue</span>
+      </section>
+      {viewingAsAdmin && awaitingReview > 0 && sponsor && (
+        <Link className="notice" href={`/admin/${eventId}/sponsors/${sponsor.id}/submissions`}>
+          {awaitingReview} submission{awaitingReview === 1 ? "" : "s"} awaiting review
+        </Link>
+      )}
       {message && <div className="notice">{message}</div>}
       {(sponsor && Object.entries(sponsor.contract_details).some(([key, value]) => key !== "source_row" && value) || viewingAsAdmin) && (
         <section className="contract-strip">
@@ -211,7 +269,7 @@ export default function SponsorRoadmap({ eventId, sponsorId, viewingAsAdmin = fa
                   <button className="admin-task-summary" type="button" onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)}>
                     <span className={`task-mini-status ${task.status === "Complete" ? "is-complete" : task.status === "Overdue" ? "is-overdue" : ""}`}>{task.status === "Complete" ? "✓" : ""}</span>
                     <span className="task-copy"><strong>{task.title}</strong><small>Quantity {task.quantity}{task.due_date ? ` · Due ${new Date(task.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}</small></span>
-                    <span className={`status-badge ${statusClass[task.status]}`}>{task.status}</span>
+                    <span className={`status-badge ${statusClass[task.status]}`}>{statusLabel(task.status)}</span>
                     <span className="accordion-chevron">{expandedTask === task.id ? "−" : "+"}</span>
                   </button>
                   {expandedTask === task.id && (

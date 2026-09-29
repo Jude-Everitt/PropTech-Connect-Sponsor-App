@@ -4,34 +4,46 @@ import Link from "next/link";
 import { use, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-browser";
+import { getContractRow, getContractTasks } from "@/lib/contract-tasks";
 import type { Event, Task, TaskStatus } from "@/lib/types";
 import SignOutButton from "@/app/ui/sign-out-button";
 
 type Props = { params: Promise<{ eventId: string }> };
 type Sponsor = { id: string; company_name: string; tier: string; contract_details: Record<string, string> };
-type Row = Task & { sponsor: Sponsor };
+type Row = Pick<Task, "id" | "sponsor_event_id" | "title" | "category" | "status" | "due_date" | "quantity"> & { sponsor: Sponsor };
+type SponsorEventLink = { id: string; sponsor_id: string };
 type SponsorSummary = {
   sponsor: Sponsor;
   tasks: Row[];
   complete: number;
+  awaitingReview: number;
+  awaitingSponsor: number;
   overdue: number;
+  maxOverdueDays: number;
   percentage: number;
 };
-
-const tierOrder = ["platinum", "gold", "silver", "bronze", "start up", "startup"];
-
-function tierRank(tier: string) {
-  const normalized = tier.trim().toLowerCase();
-  const rank = tierOrder.indexOf(normalized);
-  return rank === -1 ? tierOrder.length : rank;
-}
 
 const statusClass: Record<TaskStatus, string> = {
   "Needs You": "badge-danger",
   "With Our Team": "badge-warning",
   Complete: "badge-success",
   Overdue: "badge-danger",
+  pending_review: "badge-warning",
 };
+
+function taskState(task: Pick<Task, "status" | "due_date">, today: Date) {
+  if (task.status === "Complete") return "complete" as const;
+  if (task.status === "pending_review" || task.status === "With Our Team") return "review" as const;
+  if (task.status === "Overdue") return "overdue" as const;
+  if (task.due_date && new Date(`${task.due_date}T00:00:00`) < today) return "overdue" as const;
+  return "awaiting" as const;
+}
+
+function overdueDays(task: Pick<Task, "status" | "due_date">, today: Date) {
+  if (!task.due_date) return task.status === "Overdue" ? 1 : 0;
+  const due = new Date(`${task.due_date}T00:00:00`);
+  return Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000));
+}
 
 const contractFields = [
   ["requires_booth", "Requires Booth"], ["booth_position", "Booth Position"], ["team_tickets", "Team Tickets"],
@@ -47,6 +59,8 @@ export default function AdminDeliverablesPage({ params }: Props) {
   const { eventId } = use(params);
   const router = useRouter();
   const [event, setEvent] = useState<Event | null>(null);
+  const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+  const [sponsorEventLinks, setSponsorEventLinks] = useState<SponsorEventLink[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [activeCategory, setActiveCategory] = useState("Sponsors");
   const [message, setMessage] = useState<string | null>(null);
@@ -99,22 +113,28 @@ export default function AdminDeliverablesPage({ params }: Props) {
         return;
       }
       setEvent(eventData);
+      setSponsorEventLinks(links ?? []);
       if (!links?.length) return;
       const sponsorIds = links.map((link) => link.sponsor_id);
       const linkIds = links.map((link) => link.id);
       const [{ data: sponsors }, { data: tasks, error: taskError }] = await Promise.all([
         supabase.from("sponsors").select("id, company_name, tier, contract_details").in("id", sponsorIds),
-        supabase.from("tasks").select("id, sponsor_event_id, title, description, category, status, due_date, quantity, input_fields, input_values, action_url, action_label, response_text, file_url, file_name, file_id, ai_recommendation, ai_feedback, ai_reviewed_at, admin_review_note").in("sponsor_event_id", linkIds),
+        supabase.from("tasks").select("id, sponsor_event_id, title, category, status, due_date, quantity").in("sponsor_event_id", linkIds),
       ]);
       if (taskError) {
         setMessage(taskError.message);
         return;
       }
+      setSponsors(sponsors ?? []);
       const sponsorMap = new Map((sponsors ?? []).map((sponsor) => [sponsor.id, sponsor]));
       const linkSponsorMap = new Map(links.map((link) => [link.id, link.sponsor_id]));
       setRows((tasks ?? []).flatMap((task) => {
         const sponsor = sponsorMap.get(linkSponsorMap.get(task.sponsor_event_id) ?? "");
-        return sponsor ? [{ ...task, sponsor }] : [];
+        if (!sponsor) return [];
+        const entitlements = getContractTasks(getContractRow(sponsor.contract_details));
+        const entitlement = entitlements.find((item) => item.title === task.title && item.category === task.category)
+          ?? entitlements.find((item) => item.title === task.title);
+        return entitlement ? [{ ...task, category: entitlement.category, quantity: entitlement.quantity, sponsor }] : [];
       }));
     }
     void loadDeliverables();
@@ -123,18 +143,36 @@ export default function AdminDeliverablesPage({ params }: Props) {
   const categories = useMemo(() => ["Sponsors", ...Array.from(new Set(rows.map((row) => row.category)))], [rows]);
   const visibleRows = activeCategory === "Sponsors" ? rows : rows.filter((row) => row.category === activeCategory);
   const summaries = useMemo<SponsorSummary[]>(() => {
-    const grouped = new Map<string, SponsorSummary>();
-    visibleRows.forEach((row) => {
-      const current = grouped.get(row.sponsor.id) ?? { sponsor: row.sponsor, tasks: [], complete: 0, overdue: 0, percentage: 0 };
-      current.tasks.push(row);
-      if (row.status === "Complete") current.complete += 1;
-      if (row.status === "Overdue" || (row.due_date && row.status !== "Complete" && new Date(row.due_date) < new Date())) current.overdue += 1;
-      grouped.set(row.sponsor.id, current);
-    });
-    return Array.from(grouped.values()).map((summary) => ({ ...summary, percentage: summary.tasks.length ? Math.round((summary.complete / summary.tasks.length) * 100) : 0 })).sort((a, b) => tierRank(a.sponsor.tier) - tierRank(b.sponsor.tier) || a.sponsor.company_name.localeCompare(b.sponsor.company_name));
-  }, [visibleRows]);
-  const completeCount = rows.filter((row) => row.status === "Complete").length;
-  const tierGroups = ["Platinum", "Gold", "Silver", "Bronze", "Start-up"].map((tier) => ({ tier, sponsors: summaries.filter((summary) => summary.sponsor.tier.trim().toLowerCase() === tier.toLowerCase() || (tier === "Start-up" && ["startup", "start up"].includes(summary.sponsor.tier.trim().toLowerCase()))) })).filter((group) => group.sponsors.length > 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return sponsors.flatMap((sponsor) => {
+      const sponsorLinkIds = new Set(sponsorEventLinks.filter((link) => link.sponsor_id === sponsor.id).map((link) => link.id));
+      const sponsorTasks = visibleRows.filter((row) => row.sponsor.id === sponsor.id && sponsorLinkIds.has(row.sponsor_event_id));
+      if (activeCategory !== "Sponsors" && sponsorTasks.length === 0) return [];
+      const summary: SponsorSummary = { sponsor, tasks: sponsorTasks, complete: 0, awaitingReview: 0, awaitingSponsor: 0, overdue: 0, maxOverdueDays: 0, percentage: 0 };
+      sponsorTasks.forEach((task) => {
+        const state = taskState(task, today);
+        if (state === "complete") summary.complete += 1;
+        else if (state === "review") summary.awaitingReview += 1;
+        else if (state === "overdue") {
+          summary.overdue += 1;
+          summary.maxOverdueDays = Math.max(summary.maxOverdueDays, overdueDays(task, today));
+        } else summary.awaitingSponsor += 1;
+      });
+      summary.percentage = sponsorTasks.length ? Math.round((summary.complete / sponsorTasks.length) * 100) : 0;
+      return [summary];
+    }).sort((a, b) => Number(a.tasks.length === 0) - Number(b.tasks.length === 0) || b.overdue - a.overdue || b.maxOverdueDays - a.maxOverdueDays || a.percentage - b.percentage || b.awaitingReview - a.awaitingReview || a.sponsor.company_name.localeCompare(b.sponsor.company_name));
+  }, [sponsors, sponsorEventLinks, visibleRows, activeCategory]);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const eventCounts = rows.reduce((counts, row) => {
+    const state = taskState(row, today);
+    if (state === "complete") counts.complete += 1;
+    else if (state === "review") counts.awaitingReview += 1;
+    else if (state === "overdue") counts.overdue += 1;
+    else counts.awaitingSponsor += 1;
+    return counts;
+  }, { complete: 0, awaitingReview: 0, overdue: 0, awaitingSponsor: 0 });
 
   async function saveTask(taskId: string, formData: FormData, sponsor?: Sponsor) {
     const title = String(formData.get("title") ?? "").trim();
@@ -150,7 +188,7 @@ export default function AdminDeliverablesPage({ params }: Props) {
     setEditMessage(null);
     const contractDetails = sponsor ? { ...sponsor.contract_details } : null;
     if (contractDetails) contractFields.forEach(([key]) => { contractDetails[key] = String(formData.get(`contract_${key}`) ?? "").trim(); });
-    const { data, error } = await supabase.from("tasks").update({ title, category, quantity, status, due_date: dueDate || null }).eq("id", taskId).select("id, sponsor_event_id, title, description, category, status, due_date, quantity, input_fields, input_values, action_url, action_label, response_text, file_url, file_name, file_id, ai_recommendation, ai_feedback, ai_reviewed_at, admin_review_note").single();
+    const { data, error } = await supabase.from("tasks").update({ title, category, quantity, status, due_date: dueDate || null }).eq("id", taskId).select("id, sponsor_event_id, title, description, category, status, submitted_at, due_date, quantity, input_fields, input_values, action_url, action_label, response_text, file_url, file_name, file_size_bytes, file_id, ai_recommendation, ai_feedback, ai_reviewed_at, admin_review_note").single();
     if (error || !data) {
       setEditMessage(error?.message ?? "Could not update deliverable.");
     } else {
@@ -189,14 +227,14 @@ export default function AdminDeliverablesPage({ params }: Props) {
 
   return (
     <main className="portal-shell">
-      <header className="portal-header"><Link href="/admin" className="brand-mark"><span>PTC</span> / CONNECT</Link><div className="header-actions"><button className="sync-button" disabled={syncing} onClick={() => void syncSpreadsheet()}>{syncing ? "Syncing..." : "Sync spreadsheet"}</button><Link href="/admin" className="back-link">← Admin home</Link><SignOutButton /></div></header>
-      <section className="admin-hero"><div><p className="eyebrow">Operations / deliverables</p><h1>{event?.name ?? "Loading event..."}</h1><p className="intro-copy">Track every sponsor promise from one place.</p></div><div className="admin-metric"><strong>{completeCount}<span> / {rows.length}</span></strong><small>tasks complete</small></div></section>
+      <header className="portal-header"><Link href="/admin" className="brand-mark"><span>PTC</span> / CONNECT</Link><div className="header-actions"><button className="sync-button" disabled={syncing} onClick={() => void syncSpreadsheet()}>{syncing ? "Syncing..." : "Sync now"}</button><Link href="/admin" className="back-link">← Admin home</Link><SignOutButton /></div></header>
+      <section className="admin-hero"><div><p className="eyebrow">Operations / deliverables</p><h1>{event?.name ?? "Loading event..."}</h1><p className="intro-copy">Sponsor progress, ordered by who needs attention first.</p></div><div className="admin-metric"><strong>{eventCounts.complete}<span> / {rows.length}</span></strong><small>confirmed</small></div></section>
       <Link className="primary-button event-health-button" href={`/admin/${eventId}/health`}>Event health <span>↗</span></Link>
       {message && <div className="notice">{message}</div>}
-      {activeCategory === "Sponsors" && <section className="tier-sections" aria-label="Sponsors by tier">{tierGroups.map((group) => <div className="tier-section" key={group.tier}><div className="tier-section-heading"><p className="eyebrow">Sponsor tier</p><h2>{group.tier}</h2><span>{group.sponsors.length} sponsors</span></div><div className="tier-sponsor-names">{group.sponsors.map((summary) => <button key={summary.sponsor.id} type="button" onClick={() => setSelectedSponsor(summary)}>{summary.sponsor.company_name}<span>{summary.percentage}%</span></button>)}</div></div>)}</section>}
+      {activeCategory === "Sponsors" && <section className="deliverable-status-summary" aria-label="Event deliverable status summary"><strong>{eventCounts.complete} confirmed</strong><span>{eventCounts.awaitingReview} awaiting review</span><span>{eventCounts.awaitingSponsor} awaiting sponsors</span><span className={eventCounts.overdue > 0 ? "status-badge badge-danger" : ""}>{eventCounts.overdue} overdue</span></section>}
       {selectedSponsor && <button className="sync-button contract-open-button" onClick={() => setEditingContract(true)} type="button">Edit campaign inputs</button>}
       <nav className="category-tabs" aria-label="Deliverable categories">{categories.map((category) => <button className={activeCategory === category ? "active" : ""} key={category} onClick={() => setActiveCategory(category)}>{category}</button>)}</nav>
-      <section className="admin-table-wrap"><table><thead><tr><th>Sponsor</th><th>Tier</th><th>Progress</th><th>Overdue</th><th>Roadmap</th></tr></thead><tbody>{summaries.map((summary) => <tr key={summary.sponsor.id} className="summary-row" onClick={() => setSelectedSponsor(summary)}><td className="sponsor-cell"><span className="sponsor-avatar">{summary.sponsor.company_name.slice(0, 1)}</span>{summary.sponsor.company_name}</td><td><span className="tier-label">{summary.sponsor.tier}</span></td><td><div className="progress-cell"><strong>{summary.percentage}%</strong><div className="progress-track"><span style={{ width: `${summary.percentage}%` }} /></div><small>{summary.complete} of {summary.tasks.length} complete</small></div></td><td>{summary.overdue > 0 ? <span className="status-badge badge-danger">{summary.overdue} overdue</span> : <span className="status-badge badge-success">On track</span>}</td><td><button className="roadmap-toggle" onClick={(event) => { event.stopPropagation(); setSelectedSponsor(summary); }}>View roadmap <span>↗</span></button></td></tr>)}</tbody></table>{!message && summaries.length === 0 && <div className="empty-state">No deliverables match this category yet.</div>}</section>
+      <section className="admin-table-wrap"><table><thead><tr><th>Sponsor</th><th>Tier</th><th>Confirmed</th><th>Awaiting review</th><th>Awaiting sponsor</th><th>Overdue</th><th>Completion</th></tr></thead><tbody>{summaries.map((summary) => <tr key={summary.sponsor.id} className="summary-row" onClick={() => setSelectedSponsor(summary)}><td className="sponsor-cell"><span className="sponsor-avatar">{summary.sponsor.company_name.slice(0, 1)}</span>{summary.sponsor.company_name}</td><td><span className="tier-label">{summary.sponsor.tier}</span></td><td>{summary.complete} / {summary.tasks.length}</td><td>{summary.awaitingReview || "—"}</td><td>{summary.awaitingSponsor || "—"}</td><td>{summary.overdue > 0 ? <span className="status-badge badge-danger">{summary.overdue} overdue</span> : "—"}</td><td><div className="progress-cell"><strong>{summary.percentage}%</strong><div className="progress-track"><span style={{ width: `${summary.percentage}%` }} /></div></div></td></tr>)}</tbody></table>{!message && summaries.length === 0 && <div className="empty-state">No sponsors are linked to this event yet.</div>}</section>
       {selectedSponsor && <div className="roadmap-overlay" role="presentation" onClick={() => setSelectedSponsor(null)}><aside className="roadmap-panel" role="dialog" aria-modal="true" aria-label={`${selectedSponsor.sponsor.company_name} roadmap`} onClick={(event) => event.stopPropagation()}><div className="roadmap-panel-header"><div><p className="eyebrow">Sponsor roadmap</p><h2>{selectedSponsor.sponsor.company_name}</h2><span>{selectedSponsor.sponsor.tier}</span></div><button className="roadmap-close" aria-label="Close roadmap" onClick={() => setSelectedSponsor(null)}>×</button></div><div className="roadmap-panel-progress"><strong>{selectedSponsor.percentage}%</strong><span>{selectedSponsor.complete} of {selectedSponsor.tasks.length} complete</span>{selectedSponsor.overdue > 0 && <span className="status-badge badge-danger">{selectedSponsor.overdue} overdue</span>}</div>{editMessage && <div className="notice">{editMessage}</div>}<div className="roadmap-panel-list">{selectedSponsor.tasks.map((task) => <div className="roadmap-detail-task" key={task.id}><span className={`task-mini-status ${task.status === "Complete" ? "is-complete" : task.status === "Overdue" ? "is-overdue" : ""}`}>{task.status === "Complete" ? "✓" : ""}</span>{editingTask === task.id ? <form className="task-edit-form" action={(formData) => void saveTask(task.id, formData)}><label>Title<input name="title" defaultValue={task.title} /></label><label>Category<input name="category" defaultValue={task.category} /></label><div className="task-edit-grid"><label>Qty<input min="1" name="quantity" type="number" defaultValue={task.quantity} /></label><label>Status<select name="status" defaultValue={task.status}><option>Needs You</option><option>With Our Team</option><option>Complete</option><option>Overdue</option></select></label><label>Due date<input name="due_date" type="date" defaultValue={task.due_date ?? ""} /></label></div><div className="task-edit-actions"><button className="sync-button" type="submit" disabled={savingTask === task.id}>{savingTask === task.id ? "Saving..." : "Save changes"}</button><button className="roadmap-toggle" type="button" onClick={() => setEditingTask(null)}>Cancel</button></div></form> : <><div><strong>{task.title}</strong><small>{task.category} · Qty {task.quantity}{task.due_date ? ` · Due ${new Date(task.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}</small></div><span className={`status-badge ${statusClass[task.status]}`}>{task.status}</span><button className="roadmap-toggle task-edit-button" type="button" onClick={() => { setEditingTask(task.id); setEditMessage(null); }}>Edit</button></>}</div>)}</div></aside></div>}
       {selectedSponsor && editingContract && <div className="contract-overlay" role="presentation" onClick={() => setEditingContract(false)}><div className="contract-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}><div className="contract-editor-heading"><div><p className="eyebrow">Campaign inputs</p><h3>Edit contract details</h3></div><button className="roadmap-close" onClick={() => setEditingContract(false)}>×</button></div><form className="contract-edit-form" action={(formData) => void saveContract(selectedSponsor.sponsor, formData)}><label>Tier<input name="tier" defaultValue={selectedSponsor.sponsor.tier} /></label><div className="contract-input-grid">{contractFields.map(([key, label]) => <label key={key}>{label}<input name={key} defaultValue={selectedSponsor.sponsor.contract_details[key] ?? ""} /></label>)}</div><button className="sync-button" type="submit" disabled={savingContract}>{savingContract ? "Saving..." : "Save contract inputs"}</button></form></div></div>}
     </main>

@@ -6,11 +6,13 @@ create table if not exists public.events (
   start_date date not null,
   location text,
   google_sheet_id text,
-  google_sheet_range text not null default 'Sheet1!A:Z'
+  google_sheet_range text not null default 'Sheet1!A:Z',
+  drive_folder_id text
 );
 
 alter table public.events add column if not exists google_sheet_id text;
 alter table public.events add column if not exists google_sheet_range text not null default 'Sheet1!A:Z';
+alter table public.events add column if not exists drive_folder_id text;
 
 create table if not exists public.sponsors (
   id uuid primary key default gen_random_uuid(),
@@ -20,6 +22,7 @@ create table if not exists public.sponsors (
 );
 
 alter table public.sponsors add column if not exists contract_details jsonb not null default '{}'::jsonb;
+create unique index if not exists sponsors_company_name_normalized_uidx on public.sponsors (lower(btrim(company_name)));
 
 create table if not exists public.user_profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -31,7 +34,19 @@ create table if not exists public.sponsor_events (
   id uuid primary key default gen_random_uuid(),
   sponsor_id uuid not null references public.sponsors(id) on delete cascade,
   event_id uuid not null references public.events(id) on delete cascade,
+  drive_folder_id text,
   unique (sponsor_id, event_id)
+);
+
+alter table public.sponsor_events add column if not exists drive_folder_id text;
+
+create table if not exists public.drive_folder_creation_claims (
+  id uuid primary key default gen_random_uuid(),
+  event_id uuid unique references public.events(id) on delete cascade,
+  sponsor_event_id uuid unique references public.sponsor_events(id) on delete cascade,
+  drive_folder_id text unique,
+  created_at timestamptz not null default now(),
+  check ((event_id is not null) <> (sponsor_event_id is not null))
 );
 
 create table if not exists public.tasks (
@@ -40,7 +55,8 @@ create table if not exists public.tasks (
   title text not null,
   description text,
   category text not null,
-  status text not null default 'Needs You' check (status in ('Needs You', 'With Our Team', 'Complete', 'Overdue')),
+  status text not null default 'Needs You' check (status in ('Needs You', 'With Our Team', 'Complete', 'Overdue', 'pending_review')),
+  submitted_at timestamptz,
   due_date date,
   quantity integer not null default 1 check (quantity > 0),
   action_url text,
@@ -48,6 +64,7 @@ create table if not exists public.tasks (
   response_text text,
   file_url text,
   file_name text,
+  file_size_bytes bigint,
   file_id text,
   ai_recommendation text check (ai_recommendation in ('COMPLETE', 'NEEDS_CHANGES') or ai_recommendation is null),
   ai_feedback text,
@@ -58,7 +75,24 @@ create table if not exists public.tasks (
   unique (sponsor_event_id, title)
 );
 
+create table if not exists public.task_upload_attempts (
+  id uuid primary key default gen_random_uuid(),
+  task_id uuid not null references public.tasks(id) on delete cascade,
+  sponsor_id uuid not null references public.sponsors(id) on delete cascade,
+  status text not null check (status in ('pending_upload', 'upload_failed', 'uploaded', 'recovery_needed', 'completed')),
+  file_name text not null,
+  file_size_bytes bigint not null check (file_size_bytes >= 0),
+  drive_file_id text,
+  file_url text,
+  error_message text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.tasks add column if not exists due_date date;
+alter table public.tasks add column if not exists submitted_at timestamptz;
+alter table public.tasks drop constraint if exists tasks_status_check;
+alter table public.tasks add constraint tasks_status_check check (status in ('Needs You', 'With Our Team', 'Complete', 'Overdue', 'pending_review'));
 alter table public.tasks add column if not exists description text;
 alter table public.tasks add column if not exists quantity integer not null default 1;
 alter table public.tasks add column if not exists action_url text;
@@ -66,6 +100,7 @@ alter table public.tasks add column if not exists action_label text;
 alter table public.tasks add column if not exists response_text text;
 alter table public.tasks add column if not exists file_url text;
 alter table public.tasks add column if not exists file_name text;
+alter table public.tasks add column if not exists file_size_bytes bigint;
 alter table public.tasks add column if not exists file_id text;
 alter table public.tasks add column if not exists ai_recommendation text;
 alter table public.tasks add column if not exists ai_feedback text;
@@ -76,6 +111,8 @@ alter table public.tasks add column if not exists input_values jsonb not null de
 
 create index if not exists sponsor_events_event_id_idx on public.sponsor_events(event_id);
 create index if not exists tasks_sponsor_event_id_idx on public.tasks(sponsor_event_id);
+create index if not exists task_upload_attempts_task_id_idx on public.task_upload_attempts(task_id);
+create index if not exists task_upload_attempts_status_idx on public.task_upload_attempts(status);
 drop index if exists public.sponsor_events_sponsor_event_unique;
 create unique index sponsor_events_sponsor_event_unique on public.sponsor_events(sponsor_id, event_id);
 drop index if exists public.tasks_sponsor_event_title_unique;
@@ -86,12 +123,17 @@ alter table public.sponsors enable row level security;
 alter table public.user_profiles enable row level security;
 alter table public.sponsor_events enable row level security;
 alter table public.tasks enable row level security;
+alter table public.task_upload_attempts enable row level security;
+alter table public.drive_folder_creation_claims enable row level security;
 
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on public.events, public.sponsors, public.user_profiles, public.sponsor_events, public.tasks to authenticated;
 grant usage on schema public to service_role;
 grant select, insert, update, delete
 on public.events, public.sponsors, public.user_profiles, public.sponsor_events, public.tasks to service_role;
+grant select, insert, update, delete on public.task_upload_attempts to service_role;
+grant select on public.task_upload_attempts to authenticated;
+grant select, insert, update, delete on public.drive_folder_creation_claims to service_role;
 
 create or replace function public.is_admin()
 returns boolean
@@ -197,6 +239,10 @@ create policy "Sponsors update their own submissions"
     )
   );
 
+drop policy if exists "Admins can view task upload attempts" on public.task_upload_attempts;
+create policy "Admins can view task upload attempts"
+  on public.task_upload_attempts for select to authenticated using (public.is_admin());
+
 create or replace function public.enforce_sponsor_task_submission_fields()
 returns trigger
 language plpgsql
@@ -208,10 +254,34 @@ begin
     return new;
   end if;
 
-  if (to_jsonb(new) - array['response_text', 'input_values', 'file_url', 'file_name', 'file_id'])
+  if (to_jsonb(new) - array['response_text', 'input_values', 'file_url', 'file_name', 'file_id', 'status', 'submitted_at', 'admin_review_note'])
      is distinct from
-     (to_jsonb(old) - array['response_text', 'input_values', 'file_url', 'file_name', 'file_id']) then
+     (to_jsonb(old) - array['response_text', 'input_values', 'file_url', 'file_name', 'file_id', 'status', 'submitted_at', 'admin_review_note']) then
     raise exception 'Sponsors may only update their submission fields';
+  end if;
+
+  if new.status <> 'pending_review' or new.submitted_at is null or new.admin_review_note is not null then
+    raise exception 'Sponsor submissions must enter pending review';
+  end if;
+
+  if new.title in ('Confirm team tickets', 'Confirm RE tickets', 'Confirm VIP tickets', 'Confirm team ticket allocation', 'Confirm RE ticket allocation', 'Confirm VIP ticket allocation') then
+    if jsonb_typeof(new.input_values -> 'nominees') is distinct from 'array' then
+      raise exception 'Ticket nominees must be provided as a list';
+    end if;
+    if jsonb_array_length(new.input_values -> 'nominees') < 1
+       or jsonb_array_length(new.input_values -> 'nominees') > new.quantity then
+      raise exception 'Ticket nominees must be provided and cannot exceed the allocated quantity';
+    end if;
+    if exists (
+      select 1
+      from jsonb_array_elements(new.input_values -> 'nominees') as entries(nominee)
+      where jsonb_typeof(nominee) is distinct from 'object'
+         or nullif(btrim(nominee ->> 'first_name'), '') is null
+         or nullif(btrim(nominee ->> 'last_name'), '') is null
+         or coalesce(nominee ->> 'email', '') !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
+    ) then
+      raise exception 'Each ticket nominee requires a first name, last name, and valid email';
+    end if;
   end if;
 
   return new;

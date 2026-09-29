@@ -1,13 +1,13 @@
 export type Role = "ADMIN" | "SPONSOR";
-export type TaskStatus = "Needs You" | "With Our Team" | "Complete" | "Overdue";
+export type TaskStatus = "Needs You" | "With Our Team" | "Complete" | "Overdue" | "pending_review";
 
 export type Database = {
   public: {
     Tables: {
       events: {
-        Row: { id: string; name: string; start_date: string; location: string | null; google_sheet_id: string | null; google_sheet_range: string };
-        Insert: { id?: string; name: string; start_date: string; location?: string | null; google_sheet_id?: string | null; google_sheet_range?: string };
-        Update: { id?: string; name?: string; start_date?: string; location?: string | null; google_sheet_id?: string | null; google_sheet_range?: string };
+        Row: { id: string; name: string; start_date: string; location: string | null; google_sheet_id: string | null; google_sheet_range: string; drive_folder_id: string | null };
+        Insert: { id?: string; name: string; start_date: string; location?: string | null; google_sheet_id?: string | null; google_sheet_range?: string; drive_folder_id?: string | null };
+        Update: { id?: string; name?: string; start_date?: string; location?: string | null; google_sheet_id?: string | null; google_sheet_range?: string; drive_folder_id?: string | null };
         Relationships: [];
       };
       sponsors: {
@@ -23,9 +23,9 @@ export type Database = {
         Relationships: [];
       };
       sponsor_events: {
-        Row: { id: string; sponsor_id: string; event_id: string };
-        Insert: { id?: string; sponsor_id: string; event_id: string };
-        Update: { id?: string; sponsor_id?: string; event_id?: string };
+        Row: { id: string; sponsor_id: string; event_id: string; drive_folder_id: string | null };
+        Insert: { id?: string; sponsor_id: string; event_id: string; drive_folder_id?: string | null };
+        Update: { id?: string; sponsor_id?: string; event_id?: string; drive_folder_id?: string | null };
         Relationships: [];
       };
       tasks: {
@@ -36,6 +36,7 @@ export type Database = {
           description: string | null;
           category: string;
           status: TaskStatus;
+          submitted_at: string | null;
           due_date: string | null;
           quantity: number;
           action_url: string | null;
@@ -43,13 +44,14 @@ export type Database = {
           response_text: string | null;
           file_url: string | null;
           file_name: string | null;
+          file_size_bytes: number | null;
           file_id: string | null;
           ai_recommendation: "COMPLETE" | "NEEDS_CHANGES" | null;
           ai_feedback: string | null;
           ai_reviewed_at: string | null;
           admin_review_note: string | null;
           input_fields: Array<{ key: string; label: string; source_value: string }>;
-          input_values: Record<string, string>;
+          input_values: Record<string, unknown>;
         };
         Insert: {
           id?: string;
@@ -58,6 +60,7 @@ export type Database = {
           description?: string | null;
           category: string;
           status?: TaskStatus;
+          submitted_at?: string | null;
           due_date?: string | null;
           quantity?: number;
           action_url?: string | null;
@@ -65,13 +68,14 @@ export type Database = {
           response_text?: string | null;
           file_url?: string | null;
           file_name?: string | null;
+          file_size_bytes?: number | null;
           file_id?: string | null;
           ai_recommendation?: "COMPLETE" | "NEEDS_CHANGES" | null;
           ai_feedback?: string | null;
           ai_reviewed_at?: string | null;
           admin_review_note?: string | null;
           input_fields?: Array<{ key: string; label: string; source_value: string }>;
-          input_values?: Record<string, string>;
+          input_values?: Record<string, unknown>;
         };
         Update: {
           id?: string;
@@ -80,6 +84,7 @@ export type Database = {
           description?: string | null;
           category?: string;
           status?: TaskStatus;
+          submitted_at?: string | null;
           due_date?: string | null;
           quantity?: number;
           action_url?: string | null;
@@ -87,14 +92,63 @@ export type Database = {
           response_text?: string | null;
           file_url?: string | null;
           file_name?: string | null;
+          file_size_bytes?: number | null;
           file_id?: string | null;
           ai_recommendation?: "COMPLETE" | "NEEDS_CHANGES" | null;
           ai_feedback?: string | null;
           ai_reviewed_at?: string | null;
           admin_review_note?: string | null;
           input_fields?: Array<{ key: string; label: string; source_value: string }>;
-          input_values?: Record<string, string>;
+          input_values?: Record<string, unknown>;
         };
+        Relationships: [];
+      };
+      task_upload_attempts: {
+        Row: {
+          id: string;
+          task_id: string;
+          sponsor_id: string;
+          status: "pending_upload" | "upload_failed" | "uploaded" | "recovery_needed" | "completed";
+          file_name: string;
+          file_size_bytes: number;
+          drive_file_id: string | null;
+          file_url: string | null;
+          error_message: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          task_id: string;
+          sponsor_id: string;
+          status: "pending_upload" | "upload_failed" | "uploaded" | "recovery_needed" | "completed";
+          file_name: string;
+          file_size_bytes: number;
+          drive_file_id?: string | null;
+          file_url?: string | null;
+          error_message?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          task_id?: string;
+          sponsor_id?: string;
+          status?: "pending_upload" | "upload_failed" | "uploaded" | "recovery_needed" | "completed";
+          file_name?: string;
+          file_size_bytes?: number;
+          drive_file_id?: string | null;
+          file_url?: string | null;
+          error_message?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      drive_folder_creation_claims: {
+        Row: { id: string; event_id: string | null; sponsor_event_id: string | null; drive_folder_id: string | null; created_at: string };
+        Insert: { id?: string; event_id?: string | null; sponsor_event_id?: string | null; drive_folder_id?: string | null; created_at?: string };
+        Update: { id?: string; event_id?: string | null; sponsor_event_id?: string | null; drive_folder_id?: string | null; created_at?: string };
         Relationships: [];
       };
     };

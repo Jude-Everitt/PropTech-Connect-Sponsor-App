@@ -1,6 +1,25 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
+.deliverable-status-summary { align-items: center; border-bottom: 1px solid rgba(162,181,205,.25); border-top: 1px solid rgba(162,181,205,.25); color: var(--muted); display: flex; flex-wrap: wrap; gap: 10px 24px; margin: 0 0 26px; padding: 16px 0; }
+.deliverable-status-summary strong { color: var(--white); font-size: 15px; font-weight: 600; }
+.deliverable-status-summary span { font-family: 'DM Mono', monospace; font-size: 10px; text-transform: uppercase; }
+
+.task-input-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 10px 0; }
+.task-input-field textarea, .task-input-field select { background: rgba(5,26,51,.7); border: 1px solid rgba(162,181,205,.35); color: var(--white); min-width: 0; padding: 10px; width: 100%; }
+.task-input-field textarea { min-height: 110px; resize: vertical; }
+.task-input-field select option { background: var(--navy); color: var(--white); }
+.people-input-group { border: 1px solid rgba(162,181,205,.25); display: grid; gap: 12px; grid-column: 1 / -1; margin: 0; min-width: 0; padding: 14px; }
+.people-input-group legend { color: var(--gold); font-family: 'DM Mono', monospace; font-size: 10px; padding: 0 6px; text-transform: uppercase; }
+.person-input-row { align-items: end; border-bottom: 1px solid rgba(162,181,205,.15); display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding-bottom: 12px; }
+.file-dropzone { align-items: center; background: rgba(5,26,51,.55); border: 1px dashed rgba(162,181,205,.55); color: var(--white); cursor: pointer; display: flex; flex-direction: column; gap: 6px; justify-content: center; min-height: 120px; padding: 18px; text-align: center; }
+.file-dropzone:hover, .file-dropzone.is-dragging { border-color: var(--gold); background: rgba(214,169,91,.08); }
+.file-dropzone span, .uploaded-file { color: var(--muted); font-family: 'DM Mono', monospace; font-size: 10px; }
+.uploaded-file { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; }
+.read-only-deliverable { border-left: 2px solid var(--muted); color: var(--muted); font-size: 12px; margin: 8px 0; padding-left: 10px; }
+.visually-hidden-file-input { height: 1px; opacity: 0; overflow: hidden; position: absolute; width: 1px; }
+@media (max-width: 640px) { .task-input-grid, .person-input-row { grid-template-columns: minmax(0, 1fr); } }
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

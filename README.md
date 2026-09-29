@@ -17,7 +17,7 @@ values (
 );
 ```
 
-The sheet ID is the value between `/d/` and `/edit` in the Google Sheets URL. The admin sync button reads only the current event's sheet; the scheduled sync reads every event with a configured sheet.
+The sheet ID is the value between `/d/` and `/edit` in the Google Sheets URL. The admin **Sync now** button reads only the current event's sheet; the scheduled sync reads every event with a configured sheet.
 
 Add these server-only values to `.env.local` and to the deployment environment:
 
@@ -26,7 +26,9 @@ SUPABASE_SERVICE_ROLE_KEY=your-server-only-supabase-key
 CRON_SECRET=a-long-random-secret
 ```
 
-Share the Google Sheet with `GOOGLE_SERVICE_ACCOUNT_EMAIL`. The admin deliverables page has a manual **Sync spreadsheet** button, and `vercel.json` schedules the same sync every 15 minutes. Vercel Cron requires a Vercel plan that supports cron jobs.
+Share the Google Sheet with `GOOGLE_SERVICE_ACCOUNT_EMAIL`. `vercel.json` schedules `/api/sync/sheet` every 15 minutes, but the schedule only runs after deployment to Vercel on a plan that supports Cron. Configure `CRON_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, and the Google credentials in the Vercel project's production environment before deployment. `CRON_SECRET` must be the same value used by the deployed cron request and route. The manual **Sync now** button remains available to admins.
+
+The sheet sync is additive: it finds sponsors by normalized company name, sponsor-event links by `(sponsor_id, event_id)`, and tasks by `(sponsor_event_id, title)`. Existing tasks are updated only with sync-owned descriptive/entitlement fields; sponsor submissions, status, deadlines, and file metadata are left intact. The database also enforces uniqueness on normalized sponsor names, sponsor-event links, and task titles per sponsor-event.
 
 ## Getting Started
 

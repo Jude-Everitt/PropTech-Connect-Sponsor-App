@@ -3,11 +3,10 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseRequestClient } from "@/lib/supabase";
+import { getContractTasks } from "@/lib/contract-tasks";
 import type { Database } from "@/lib/types";
 
 export const runtime = "nodejs";
-
-type CampaignElement = { label: string; category: string; taskTitle: string; aliases: string[]; action_url?: string; action_label?: string };
 
 type SheetRow = Record<string, string>;
 type SyncClient = SupabaseClient<Database>;
@@ -52,102 +51,8 @@ function normalizeHeader(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 }
 
-function isTruthy(value: string | undefined) {
-  return !!value && ["true", "yes", "y", "1", "x", "included"].includes(value.trim().toLowerCase());
-}
-
-function getQuantity(row: SheetRow, element: CampaignElement) {
-  const value = element.aliases.map((alias) => row[alias]).find((candidate) => candidate !== undefined && candidate !== "");
-  if (!value) return 0;
-  const quantity = Number(value.replace(/,/g, ""));
-  if (Number.isFinite(quantity) && quantity > 0) return Math.floor(quantity);
-  return isTruthy(value) || value.trim().length > 0 ? 1 : 0;
-}
-
-const bookingLink = "https://meetings-eu1.hubspot.com/evu";
-const roundtableBookingLink = "https://meetings-eu1.hubspot.com/evu/roundtable";
-type GeneratedTask = { title: string; description: string; category: string; quantity: number; input_fields?: Array<{ key: string; label: string; source_value: string }>; action_url?: string; action_label?: string };
-
-const taskDescriptions: Record<string, string> = {
-  "Submit booth artwork": "Provide the final artwork for the allocated booth, including any required dimensions and brand assets.",
-  "Note additional furniture to rent": "List any furniture required beyond the standard furniture included in the booth package.",
-  "Note additional equipment to rent": "List any AV, electrical, display, or other equipment that needs to be rented.",
-  "Approve artwork": "Review and approve the final artwork before production.",
-  "Note booth activations": "Describe the planned booth activations, visitor experience, and staffing requirements.",
-  "Confirm team ticket allocation": "Confirm the number of team tickets allocated and provide attendee details when available.",
-  "Confirm RE ticket allocation": "Confirm the number of RE tickets allocated and provide attendee details when available.",
-  "Confirm VIP ticket allocation": "Confirm the number of VIP tickets allocated and provide attendee details when available.",
-  "Confirm panel details": "Confirm the panel date, time, stage, title, panellists, and moderator details.",
-  "Book a call with Elena (Head of Content)": "Use the supplied booking link to arrange a call with Elena, Head of Content.",
-  "Submit case study": "Submit the agreed case study content and supporting assets.",
-  "Submit innovation details": "Provide the innovation details and supporting information for review.",
-  "Confirm workshop details": "Confirm the workshop format, title, speakers, timings, and requirements.",
-  "Confirm private meeting room": "Confirm the private meeting room requirements, timings, and attendee details.",
-  "Call Account Manager and Client Success to confirm option": "Speak with the Account Manager and Client Success team to confirm the RT, tour, or meetings option.",
-  "Select a tour": "Select the preferred tour option and provide any attendee or access requirements.",
-  "Confirm 10 meetings": "Confirm the 10-meeting allocation and provide meeting preferences or attendee details.",
-  "Submit artwork": "Submit the final artwork for the selected venue branding item.",
-  "Submit pillar artwork": "Submit the final artwork for the allocated pillars and confirm their locations.",
-  "Create company profile on the networking app": "Create or update the company profile in the networking app using the supplied link.",
-};
-
-function hasValue(row: SheetRow, aliases: string[]) {
-  return aliases.some((alias) => getQuantity(row, { label: alias, category: "", taskTitle: "", aliases: [alias] }) > 0);
-}
-
-function getContractTasks(row: SheetRow): GeneratedTask[] {
-  const tasks: GeneratedTask[] = [];
-  const add = (title: string, category: string, aliases: string[], action?: { url: string; label: string }) => {
-    const quantity = getQuantity(row, { label: title, category, taskTitle: title, aliases });
-    if (quantity > 0) tasks.push({ title, category, quantity, description: taskDescriptions[title] ?? "Provide the requested information or assets for this deliverable.", action_url: action?.url, action_label: action?.label });
-  };
-
-  if (isTruthy(row.requires_booth) || isTruthy(row.booth)) {
-    add("Submit booth artwork", "Exhibition Booth", ["requires_booth"]);
-    add("Note additional furniture to rent", "Exhibition Booth", ["booth_position"]);
-    add("Note additional equipment to rent", "Exhibition Booth", ["booth_position"]);
-    add("Approve artwork", "Exhibition Booth", ["requires_booth"]);
-    add("Note booth activations", "Exhibition Booth", ["requires_booth"]);
-  }
-  add("Confirm team ticket allocation", "Tickets", ["team_tickets"]);
-  add("Confirm RE ticket allocation", "Tickets", ["re_tickets"]);
-  add("Confirm VIP ticket allocation", "Tickets", ["vip_tickets"]);
-  if (hasValue(row, ["sponsor_panels", "specified_panel"])) {
-    add("Book a call with Elena (Head of Content)", "Sponsor Panels", ["sponsor_panels", "specified_panel"], { url: bookingLink, label: "Booking Link" });
-    add("Confirm panel details", "Sponsor Panels", ["sponsor_panels", "specified_panel"]);
-  }
-  add("Submit case study", "Case Study", ["case_study"]);
-  add("Submit innovation details", "Innovation", ["innovation"]);
-  add("Confirm workshop details", "Workshop", ["workshop"]);
-  add("Confirm private meeting room", "Meetings", ["private_meeting_room"]);
-  add("Call Account Manager and Client Success to confirm option", "Meetings", ["choose_rt_tour_meetings"]);
-  add("Book a call with Elena (Head of Content)", "Roundtables", ["roundtable"], { url: roundtableBookingLink, label: "Booking Link" });
-  add("Select a tour", "Tours", ["tours"]);
-  add("Confirm 10 meetings", "Meetings", ["10_meetings"]);
-  if (hasValue(row, ["t1_branding", "t2_branding", "t3_branding", "t4_branding"])) add("Submit artwork", "Venue Branding", ["t1_branding", "t2_branding", "t3_branding", "t4_branding"]);
-  if (hasValue(row, ["pillars", "pillar_location"])) add("Submit pillar artwork", "Pillars", ["pillars", "pillar_location"]);
-  add("Create company profile on the networking app", "Networking", ["networking_app_profile"], { url: "https://sponsor.brella.io/events", label: "Edit Company Profile" });
-  return tasks;
-}
-
-function getTabTasks(row: SheetRow): GeneratedTask[] {
-  const grouped = new Map<string, Array<{ key: string; label: string; source_value: string }>>();
-  Object.entries(row).forEach(([key, value]) => {
-    const separator = key.indexOf(".");
-    if (separator < 1 || !value.trim() || key === "source_tabs") return;
-    const tabName = key.slice(0, separator);
-    const columnName = key.slice(separator + 1).replace(/_/g, " ");
-    const fields = grouped.get(tabName) ?? [];
-    fields.push({ key: `${tabName}.${key.slice(separator + 1)}`, label: columnName, source_value: value });
-    grouped.set(tabName, fields);
-  });
-  return Array.from(grouped.entries()).map(([tabName, inputFields]) => ({
-    title: `${tabName} deliverables`,
-    description: `Complete the required inputs from the ${tabName} tab. Each field below represents a required part of this deliverable.`,
-    category: tabName,
-    quantity: 1,
-    input_fields: inputFields,
-  }));
+function normalizeSponsorName(value: string) {
+  return value.trim().toLowerCase();
 }
 
 function toRows(values: string[][]) {
@@ -205,7 +110,7 @@ async function readSheet(spreadsheetId: string, range: string) {
 
   contractRows.forEach((row) => {
     const companyName = row.company_name || row.company || row.sponsor || row.sponsor_name;
-    if (companyName) mergedRows.set(companyName.trim().toLowerCase(), { ...row, source_tabs: "Contracts" });
+    if (companyName) mergedRows.set(normalizeSponsorName(companyName), { ...row, source_tabs: "Contracts" });
   });
 
   for (const tabName of Array.from(availableTabs).filter((name) => name !== "Contracts")) {
@@ -216,7 +121,7 @@ async function readSheet(spreadsheetId: string, range: string) {
     dataRows.filter((row) => row.some((value) => value.trim())).forEach((dataRow) => {
       const companyName = dataRow[identifierColumn]?.trim();
       if (!companyName) return;
-      const key = companyName.toLowerCase();
+      const key = normalizeSponsorName(companyName);
       const merged = mergedRows.get(key) ?? { company_name: companyName, source_tabs: "" };
       headers.forEach((header, index) => {
         const value = dataRow[index]?.trim() ?? "";
@@ -232,6 +137,9 @@ async function readSheet(spreadsheetId: string, range: string) {
 
 async function syncRows(client: SyncClient, rows: SheetRow[], eventConfig: EventConfig): Promise<SyncResult> {
   const result: SyncResult = { rows_read: rows.length, sponsors_synced: 0, tasks_created: 0, skipped: [] };
+  const { data: existingSponsors, error: sponsorsError } = await client.from("sponsors").select("id, company_name");
+  if (sponsorsError) throw sponsorsError;
+  const sponsorByName = new Map((existingSponsors ?? []).map((sponsor) => [normalizeSponsorName(sponsor.company_name), sponsor]));
 
   for (const [index, row] of rows.entries()) {
     const rowNumber = index + 2;
@@ -244,18 +152,14 @@ async function syncRows(client: SyncClient, rows: SheetRow[], eventConfig: Event
       continue;
     }
     const contractDetails = { ...row, source_row: rowNumber };
-    const { data: existingSponsor, error: sponsorLookupError } = await client
-      .from("sponsors")
-      .select("id")
-      .eq("company_name", companyName)
-      .limit(1)
-      .maybeSingle();
-    if (sponsorLookupError) throw sponsorLookupError;
+    const sponsorKey = normalizeSponsorName(companyName);
+    const existingSponsor = sponsorByName.get(sponsorKey);
 
     const { data: sponsor, error: sponsorError } = existingSponsor
       ? await client.from("sponsors").update({ tier, contract_details: contractDetails }).eq("id", existingSponsor.id).select("id").single()
       : await client.from("sponsors").insert({ company_name: companyName, tier, contract_details: contractDetails }).select("id").single();
     if (sponsorError || !sponsor) throw sponsorError ?? new Error("Could not sync sponsor");
+    if (!existingSponsor) sponsorByName.set(sponsorKey, { id: sponsor.id, company_name: companyName });
 
     const { data: existingSponsorEvent, error: linkLookupError } = await client
       .from("sponsor_events")
@@ -270,7 +174,7 @@ async function syncRows(client: SyncClient, rows: SheetRow[], eventConfig: Event
       : await client.from("sponsor_events").insert({ sponsor_id: sponsor.id, event_id: eventId }).select("id").single();
     if (linkError || !sponsorEvent) throw linkError ?? new Error("Could not link sponsor to event");
 
-    const taskRows = [...getContractTasks(row), ...getTabTasks(row)].map((task) => ({ ...task, input_fields: task.input_fields ?? [], input_values: {}, sponsor_event_id: sponsorEvent.id }));
+    const taskRows = getContractTasks(row).map((task) => ({ ...task, input_fields: [], input_values: {}, sponsor_event_id: sponsorEvent.id }));
     if (taskRows.length) {
       for (const task of taskRows) {
         const { data: existingTask, error: taskLookupError } = await client
@@ -286,7 +190,7 @@ async function syncRows(client: SyncClient, rows: SheetRow[], eventConfig: Event
           if (taskInsertError) throw taskInsertError;
           result.tasks_created += 1;
         } else {
-          const { error: taskUpdateError } = await client.from("tasks").update({ description: task.description, quantity: task.quantity, input_fields: task.input_fields ?? [], action_url: task.action_url ?? null, action_label: task.action_label ?? null }).eq("id", existingTask.id);
+          const { error: taskUpdateError } = await client.from("tasks").update({ description: task.description, category: task.category, quantity: task.quantity, input_fields: [], action_url: task.action_url ?? null, action_label: task.action_label ?? null }).eq("id", existingTask.id);
           if (taskUpdateError) throw taskUpdateError;
         }
       }
