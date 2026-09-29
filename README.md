@@ -1,4 +1,32 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PropTech Connect Sponsor Portal
+
+## Google Sheets Sync
+
+The importer uses one Google Sheet per event. Use the first row as headers with columns such as `company_name`, `tier`, and `entitlements`. Entitlements can be comma-separated (`panel,booth`) or represented by boolean columns such as `panel`, `roundtable`, and `booth`. The complete source row is stored in each sponsor's `contract_details` JSON field.
+
+After running the schema, register an event and its sheet in Supabase:
+
+```sql
+insert into public.events (name, start_date, location, google_sheet_id, google_sheet_range)
+values (
+	'PropTech Connect Middle East 27',
+	'2027-03-18',
+	'Middle East',
+	'YOUR_SHEET_ID',
+	'Sheet1!A:Z'
+);
+```
+
+The sheet ID is the value between `/d/` and `/edit` in the Google Sheets URL. The admin sync button reads only the current event's sheet; the scheduled sync reads every event with a configured sheet.
+
+Add these server-only values to `.env.local` and to the deployment environment:
+
+```env
+SUPABASE_SERVICE_ROLE_KEY=your-server-only-supabase-key
+CRON_SECRET=a-long-random-secret
+```
+
+Share the Google Sheet with `GOOGLE_SERVICE_ACCOUNT_EMAIL`. The admin deliverables page has a manual **Sync spreadsheet** button, and `vercel.json` schedules the same sync every 15 minutes. Vercel Cron requires a Vercel plan that supports cron jobs.
 
 ## Getting Started
 
