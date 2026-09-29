@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-browser";
 
 function SignInForm() {
   const router = useRouter();
@@ -29,6 +29,11 @@ function SignInForm() {
       ? await supabase.from("user_profiles").select("role").eq("id", userData.user.id).single()
       : { data: null, error: null };
     const normalizedRole = typeof profile?.role === "string" ? profile.role.trim().toUpperCase() : null;
+    if (requestedRole === "sponsor" && normalizedRole === "ADMIN") {
+      router.push("/admin");
+      router.refresh();
+      return;
+    }
     if (requestedRole === "admin" && normalizedRole !== "ADMIN") {
       await supabase.auth.signOut();
       setError(profileError ? `Could not read your portal profile: ${profileError.message}` : "This account is not configured as an admin. Ask an administrator to set your profile role to ADMIN.");

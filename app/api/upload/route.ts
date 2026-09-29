@@ -44,17 +44,40 @@ export async function POST(request: Request) {
     const authorization = request.headers.get("authorization");
     const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : null;
     if (!token) return NextResponse.json({ error: "Authorization bearer token required" }, { status: 401 });
-    const { data: userData, error: userError } = await createSupabaseRequestClient(token).auth.getUser(token);
+    const client = createSupabaseRequestClient(token);
+    const { data: userData, error: userError } = await client.auth.getUser(token);
     if (userError || !userData.user) return NextResponse.json({ error: "Invalid access token" }, { status: 401 });
 
     const formData = await request.formData();
     const file = formData.get("file");
-    const eventName = String(formData.get("eventName") ?? "").trim();
-    const sponsorName = String(formData.get("sponsorName") ?? "").trim();
+    const taskId = String(formData.get("task_id") ?? "").trim();
 
-    if (!(file instanceof File) || !eventName || !sponsorName) {
-      return NextResponse.json({ error: "file, eventName, and sponsorName are required" }, { status: 400 });
+    if (!(file instanceof File) || !taskId) {
+      return NextResponse.json({ error: "file and task_id are required" }, { status: 400 });
     }
+
+    const [{ data: profile, error: profileError }, { data: task, error: taskError }] = await Promise.all([
+      client.from("user_profiles").select("role, sponsor_id").eq("id", userData.user.id).maybeSingle(),
+      client.from("tasks").select("sponsor_event_id").eq("id", taskId).maybeSingle(),
+    ]);
+    if (profileError || !profile) return NextResponse.json({ error: "Portal profile not found" }, { status: 403 });
+    if (taskError || !task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
+
+    const { data: sponsorEvent, error: sponsorEventError } = await client
+      .from("sponsor_events")
+      .select("sponsor_id, event_id")
+      .eq("id", task.sponsor_event_id)
+      .maybeSingle();
+    if (sponsorEventError || !sponsorEvent) return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    if (profile.role !== "ADMIN" && (profile.role !== "SPONSOR" || profile.sponsor_id !== sponsorEvent.sponsor_id)) {
+      return NextResponse.json({ error: "You cannot upload to this task" }, { status: 403 });
+    }
+
+    const [{ data: event }, { data: sponsor }] = await Promise.all([
+      client.from("events").select("name").eq("id", sponsorEvent.event_id).single(),
+      client.from("sponsors").select("company_name").eq("id", sponsorEvent.sponsor_id).single(),
+    ]);
+    if (!event || !sponsor) return NextResponse.json({ error: "Could not load task destination" }, { status: 404 });
 
     const auth = new google.auth.JWT({
       email: requiredEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
@@ -63,8 +86,8 @@ export async function POST(request: Request) {
     });
     const drive = google.drive({ version: "v3", auth });
     const rootId = requiredEnv("GOOGLE_DRIVE_PTC_ROOT_ID");
-    const eventFolderId = await findOrCreateFolder(drive, eventName, rootId);
-    const sponsorFolderId = await findOrCreateFolder(drive, sponsorName, eventFolderId);
+    const eventFolderId = await findOrCreateFolder(drive, event.name, rootId);
+    const sponsorFolderId = await findOrCreateFolder(drive, sponsor.company_name, eventFolderId);
 
     const uploaded = await drive.files.create({
       requestBody: {

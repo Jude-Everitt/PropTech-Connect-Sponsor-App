@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { use, useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-browser";
 import type { Event } from "@/lib/types";
 import SignOutButton from "@/app/ui/sign-out-button";
 

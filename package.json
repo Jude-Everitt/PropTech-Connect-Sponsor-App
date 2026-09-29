@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.116.0",
     "googleapi": "^1.0.2",
     "googleapis": "^181.0.0",

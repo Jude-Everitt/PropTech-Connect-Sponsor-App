@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-browser";
 import type { Event, Role } from "@/lib/types";
 import SignOutButton from "@/app/ui/sign-out-button";
 
@@ -15,6 +15,19 @@ export default function HubPage() {
 
   useEffect(() => {
     async function loadHub() {
+      const notice = new URLSearchParams(window.location.search).get("notice");
+      const noticeMessages: Record<string, string> = {
+        "admin-required": "The admin portal is available to staff accounts only.",
+        "sponsor-required": "This sponsor portal requires a sponsor account.",
+        "sponsor-unlinked": "Your sponsor account is not linked to a company yet. Contact the portal administrator.",
+        "event-unlinked": "That event is not linked to your sponsor account.",
+      };
+      if (notice && noticeMessages[notice]) {
+        setError(noticeMessages[notice]);
+        setLoading(false);
+        return;
+      }
+
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData.user) {
         setError("Sign in to view your event hub.");
@@ -44,7 +57,11 @@ export default function HubPage() {
           .order("start_date");
         if (eventsError) setError(eventsError.message);
         setEvents(data ?? []);
-      } else if (profile.sponsor_id) {
+      } else if (!profile.sponsor_id) {
+        setError("Your sponsor account is not linked to a company yet. Contact the portal administrator.");
+        setLoading(false);
+        return;
+      } else {
         const { data: sponsor } = await supabase
           .from("sponsors")
           .select("company_name")

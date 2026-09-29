@@ -6,9 +6,6 @@ export const runtime = "nodejs";
 
 type ReviewPayload = {
   task_id?: string;
-  response_text?: string;
-  file_name?: string;
-  file_id?: string;
 };
 
 type GeminiReview = {
@@ -53,6 +50,15 @@ export async function POST(request: Request) {
     const { data: userData, error: authError } = await client.auth.getUser(token);
     if (authError || !userData.user) return NextResponse.json({ error: "Invalid access token" }, { status: 401 });
 
+    const { data: profile, error: profileError } = await client
+      .from("user_profiles")
+      .select("role")
+      .eq("id", userData.user.id)
+      .maybeSingle();
+    if (profileError || profile?.role !== "ADMIN") {
+      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+    }
+
     const { data: task, error: taskError } = await client
       .from("tasks")
       .select("id, title, category, status, response_text, file_name, file_id, sponsor_event_id")
@@ -60,17 +66,8 @@ export async function POST(request: Request) {
       .single();
     if (taskError || !task) return NextResponse.json({ error: taskError?.message ?? "Task not found" }, { status: 404 });
 
-    const { data: profile } = await client.from("user_profiles").select("role, sponsor_id").eq("id", userData.user.id).single();
-    const isAdmin = profile?.role === "ADMIN";
-    if (!isAdmin) {
-      const { data: link } = await client.from("sponsor_events").select("sponsor_id").eq("id", task.sponsor_event_id).single();
-      if (profile?.role !== "SPONSOR" || !profile.sponsor_id || link?.sponsor_id !== profile.sponsor_id) {
-        return NextResponse.json({ error: "You cannot review this task" }, { status: 403 });
-      }
-    }
-
-    const responseText = payload.response_text?.trim() || task.response_text || "No text response supplied.";
-    const fileName = payload.file_name || task.file_name || "No file supplied.";
+    const responseText = task.response_text?.trim() || "No text response supplied.";
+    const fileName = task.file_name || "No file supplied.";
     const filePart = await getFilePart(task.file_id, fileName);
     const prompt = `You review sponsor event deliverables. Decide whether this submission is sufficient for the task. Inspect the attached file when present. Do not invent missing evidence. Return ONLY valid JSON with exactly these keys: recommendation (COMPLETE or NEEDS_CHANGES) and feedback (short, actionable string). Task: ${task.title}. Category: ${task.category}. Sponsor text response: ${responseText}. Uploaded file name: ${fileName}. Current status: ${task.status}.`;
     const apiKey = process.env.GEMINI_API_KEY;
@@ -86,10 +83,8 @@ export async function POST(request: Request) {
     const text = geminiJson.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) return NextResponse.json({ error: "Gemini returned no review" }, { status: 502 });
     const review = parseGeminiText(text);
-    if (isAdmin) {
-      const { error: updateError } = await client.from("tasks").update({ ai_recommendation: review.recommendation, ai_feedback: review.feedback, ai_reviewed_at: new Date().toISOString() }).eq("id", task.id);
-      if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
-    }
+    const { error: updateError } = await client.from("tasks").update({ ai_recommendation: review.recommendation, ai_feedback: review.feedback, ai_reviewed_at: new Date().toISOString() }).eq("id", task.id);
+    if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
     return NextResponse.json(review);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Gemini review failed" }, { status: 500 });

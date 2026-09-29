@@ -35,6 +35,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Authorization bearer token required" }, { status: 401 });
   }
 
+  const supabase = createSupabaseRequestClient(token);
+  const { data: userData, error: userError } = await supabase.auth.getUser(token);
+  if (userError || !userData.user) {
+    return NextResponse.json({ error: "Invalid access token" }, { status: 401 });
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("user_profiles")
+    .select("role")
+    .eq("id", userData.user.id)
+    .maybeSingle();
+  if (profileError || profile?.role !== "ADMIN") {
+    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  }
+
   let payload: SyncPayload;
   try {
     payload = (await request.json()) as SyncPayload;
@@ -52,12 +67,6 @@ export async function POST(request: Request) {
       { error: "company_name, tier, and event_id are required" },
       { status: 400 },
     );
-  }
-
-  const supabase = createSupabaseRequestClient(token);
-  const { data: userData, error: userError } = await supabase.auth.getUser(token);
-  if (userError || !userData.user) {
-    return NextResponse.json({ error: "Invalid access token" }, { status: 401 });
   }
 
   const sponsor: Database["public"]["Tables"]["sponsors"]["Insert"] = {
