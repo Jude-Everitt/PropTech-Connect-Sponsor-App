@@ -1,5 +1,7 @@
 # PropTech Connect Sponsor Portal
 
+A project management tool for sponsors taking part in PropTech Connect. It highlights campaign details and roadmaps, with an admin portal for PTC staff to track sponsor progress going into an event.
+
 ## Google Sheets Sync
 
 The importer uses one Google Sheet per event. Use the first row as headers with columns such as `company_name`, `tier`, and `entitlements`. Entitlements can be comma-separated (`panel,booth`) or represented by boolean columns such as `panel`, `roundtable`, and `booth`. The complete source row is stored in each sponsor's `contract_details` JSON field.
