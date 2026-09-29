@@ -81,9 +81,9 @@ export default function SponsorRoadmapPage({ params }: Props) {
     if (!response.ok) {
       setMessage(result.error ?? "Upload failed.");
     } else {
-      const { error } = await supabase.from("tasks").update({ status: "Complete", file_url: result.link ?? null, file_id: result.id ?? null, file_name: file.name }).eq("id", task.id);
+      const { error } = await supabase.from("tasks").update({ file_url: result.link ?? null, file_id: result.id ?? null, file_name: file.name }).eq("id", task.id);
       if (error) setMessage(error.message);
-      else setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: "Complete", file_url: result.link ?? null, file_id: result.id ?? null, file_name: file.name } : item));
+      else setTasks((current) => current.map((item) => item.id === task.id ? { ...item, file_url: result.link ?? null, file_id: result.id ?? null, file_name: file.name } : item));
     }
     setUploadingTask(null);
   }
@@ -100,14 +100,6 @@ export default function SponsorRoadmapPage({ params }: Props) {
     const { error } = await supabase.from("tasks").update({ response_text: responseText }).eq("id", task.id);
     if (error) setMessage(error.message);
     else setTasks((current) => current.map((item) => item.id === task.id ? { ...item, response_text: responseText } : item));
-    setSavingTask(null);
-  }
-
-  async function markComplete(task: Task) {
-    setSavingTask(task.id);
-    const { error } = await supabase.from("tasks").update({ status: "Complete" }).eq("id", task.id);
-    if (error) setMessage(error.message);
-    else setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: "Complete" } : item));
     setSavingTask(null);
   }
 
@@ -152,7 +144,7 @@ export default function SponsorRoadmapPage({ params }: Props) {
                   <div className={`task-check ${task.status === "Complete" ? "is-complete" : ""}`}>{task.status === "Complete" ? "✓" : ""}</div>
                   <div className="task-copy"><strong>{task.title}{task.quantity > 1 ? ` × ${task.quantity}` : ""}</strong><small>{task.due_date ? `Due ${new Date(task.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Date to be confirmed"}</small>{task.description && <details className="task-requirements"><summary>What this task requires</summary><p>{task.description}</p></details>}{task.action_url && <a className="task-action-link" href={task.action_url} target="_blank" rel="noreferrer">{task.action_label ?? "Open link"} ↗</a>}</div>
                   <span className={`status-badge ${statusClass[task.status]}`}>{task.status}</span>
-                  <div className="task-actions"><label className="upload-button">{uploadingTask === task.id ? "Uploading..." : task.file_name ? "Replace file" : "Upload file"}<input type="file" disabled={uploadingTask !== null || savingTask !== null} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadForTask(task, file); }} /></label><button className="complete-button" disabled={savingTask !== null || task.status === "Complete"} onClick={() => void markComplete(task)} type="button">{task.status === "Complete" ? "Complete" : "Mark Task Complete"}</button><button className="roadmap-toggle" disabled={reviewingTask !== null} onClick={() => void reviewWithGemini(task)} type="button">{reviewingTask === task.id ? "Reviewing..." : "Ask Gemini to review"}</button></div>
+                  <div className="task-actions"><label className="upload-button">{uploadingTask === task.id ? "Uploading..." : task.file_name ? "Replace file" : "Upload file"}<input type="file" disabled={uploadingTask !== null || savingTask !== null} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadForTask(task, file); }} /></label><button className="roadmap-toggle" disabled={reviewingTask !== null} onClick={() => void reviewWithGemini(task)} type="button">{reviewingTask === task.id ? "Reviewing..." : "Ask Gemini to review"}</button></div>
                   <div className="task-response"><textarea aria-label={`Response for ${task.title}`} placeholder="Add your response or details (optional)" value={responses[task.id] ?? ""} onChange={(event) => setResponses((current) => ({ ...current, [task.id]: event.target.value }))} /><button className="roadmap-toggle" disabled={savingTask === task.id} onClick={() => void saveText(task)} type="button">{savingTask === task.id ? "Saving..." : "Save response"}</button></div>
                   {task.admin_review_note && <div className="review-note"><small>Admin review note</small><p>{task.admin_review_note}</p></div>}{task.ai_feedback && <div className={`ai-feedback ${task.ai_recommendation === "COMPLETE" ? "is-positive" : "is-warning"}`}><strong>Gemini: {task.ai_recommendation === "COMPLETE" ? "Looks complete" : "Needs changes"}</strong><span>{task.ai_feedback}</span></div>}
                 </div>

@@ -61,7 +61,8 @@ export async function POST(request: Request) {
     if (taskError || !task) return NextResponse.json({ error: taskError?.message ?? "Task not found" }, { status: 404 });
 
     const { data: profile } = await client.from("user_profiles").select("role, sponsor_id").eq("id", userData.user.id).single();
-    if (profile?.role !== "ADMIN") {
+    const isAdmin = profile?.role === "ADMIN";
+    if (!isAdmin) {
       const { data: link } = await client.from("sponsor_events").select("sponsor_id").eq("id", task.sponsor_event_id).single();
       if (profile?.role !== "SPONSOR" || !profile.sponsor_id || link?.sponsor_id !== profile.sponsor_id) {
         return NextResponse.json({ error: "You cannot review this task" }, { status: 403 });
@@ -85,8 +86,10 @@ export async function POST(request: Request) {
     const text = geminiJson.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) return NextResponse.json({ error: "Gemini returned no review" }, { status: 502 });
     const review = parseGeminiText(text);
-    const { error: updateError } = await client.from("tasks").update({ ai_recommendation: review.recommendation, ai_feedback: review.feedback, ai_reviewed_at: new Date().toISOString() }).eq("id", task.id);
-    if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
+    if (isAdmin) {
+      const { error: updateError } = await client.from("tasks").update({ ai_recommendation: review.recommendation, ai_feedback: review.feedback, ai_reviewed_at: new Date().toISOString() }).eq("id", task.id);
+      if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
     return NextResponse.json(review);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Gemini review failed" }, { status: 500 });
