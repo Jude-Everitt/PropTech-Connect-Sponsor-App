@@ -93,10 +93,11 @@ export async function POST(request: Request) {
     if (!schema.sponsorEditable) return NextResponse.json({ error: "This deliverable is managed by the event team" }, { status: 403 });
     const hasFile = Boolean(values.file_id || values.file_url || values.file_name);
     if (hasFile && !schema.allowFile) return NextResponse.json({ error: "This deliverable does not accept file uploads" }, { status: 400 });
-    const mergedInputValues = {
-      ...(isRecord(task.input_values) ? task.input_values : {}),
-      ...(values.input_values ?? {}),
-    };
+    const schemaKeys = new Set(schema.fields.map((field) => field.key));
+    const mergedInputValues = Object.fromEntries(
+      Object.entries(isRecord(task.input_values) ? task.input_values : {}).filter(([key]) => schemaKeys.has(key)),
+    );
+    Object.assign(mergedInputValues, values.input_values ?? {});
     const validationError = validateTaskInputValues(schema, mergedInputValues);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
     if (values.input_values) values.input_values = mergedInputValues;

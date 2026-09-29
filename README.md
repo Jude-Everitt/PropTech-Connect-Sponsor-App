@@ -4,7 +4,7 @@ A project management tool for sponsors taking part in PropTech Connect. It highl
 
 ## Google Sheets Sync
 
-The importer uses one Google Sheet per event. Use the first row as headers with columns such as `company_name`, `tier`, and `entitlements`. Entitlements can be comma-separated (`panel,booth`) or represented by boolean columns such as `panel`, `roundtable`, and `booth`. The complete source row is stored in each sponsor's `contract_details` JSON field.
+The importer uses one Google Sheet per event. The sponsor roster and sponsor names come only from column E of the `Contracts` tab; rows from other tabs are merged only when their company matches a sponsor on that roster. Use the first row as headers with contract details such as `tier` and `entitlements`. Entitlements can be comma-separated (`panel,booth`) or represented by boolean columns such as `panel`, `roundtable`, and `booth`. The complete matched source data is stored in each sponsor's `contract_details` JSON field.
 
 After running the schema, register an event and its sheet in Supabase:
 
@@ -15,7 +15,7 @@ values (
 	'2027-03-18',
 	'Middle East',
 	'YOUR_SHEET_ID',
-	'Sheet1!A:Z'
+	'Contracts!A:ZZ'
 );
 ```
 

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseRequestClient } from "@/lib/supabase";
-import { getContractTasks } from "@/lib/contract-tasks";
+import { getContractRow, getContractTasks } from "@/lib/contract-tasks";
 import type { Database } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -22,7 +22,6 @@ type EventConfig = {
   id: string;
   name: string;
   google_sheet_id: string | null;
-  google_sheet_range: string;
 };
 
 const additionalSheetColumns: Record<string, number> = {
@@ -55,13 +54,16 @@ function normalizeSponsorName(value: string) {
   return value.trim().toLowerCase();
 }
 
-function toRows(values: string[][]) {
+function toRows(values: string[][], companyNameColumn?: number): SheetRow[] {
   const [headerRow, ...dataRows] = values;
   if (!headerRow?.length) return [];
   const headers = headerRow.map(normalizeHeader);
   return dataRows
     .filter((row) => row.some((value) => value.trim()))
-    .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index]?.trim() ?? ""])));
+    .map((row) => ({
+      ...Object.fromEntries(headers.map((header, index) => [header, row[index]?.trim() ?? ""])),
+      ...(companyNameColumn === undefined ? {} : { company_name: row[companyNameColumn]?.trim() ?? "" }),
+    }));
 }
 
 function getBearerToken(request: Request) {
@@ -92,7 +94,7 @@ async function getAuthorizedClient(request: Request): Promise<SyncClient> {
   return client as unknown as SyncClient;
 }
 
-async function readSheet(spreadsheetId: string, range: string) {
+async function readSheet(spreadsheetId: string) {
   const auth = new google.auth.JWT({
     email: requiredEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
     key: requiredEnv("GOOGLE_PRIVATE_KEY").replace(/\\n/g, "\n"),
@@ -101,9 +103,10 @@ async function readSheet(spreadsheetId: string, range: string) {
   const sheets = google.sheets({ version: "v4", auth });
   const contractResponse = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range,
+    range: "'Contracts'!A:ZZ",
   });
-  const contractRows = toRows((contractResponse.data.values ?? []) as string[][]);
+  const contractValues = (contractResponse.data.values ?? []) as string[][];
+  const contractRows = toRows(contractValues, 4).filter((row) => Boolean(row.company_name));
   const metadata = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets(properties(title))" });
   const availableTabs = new Set((metadata.data.sheets ?? []).map((sheet) => sheet.properties?.title).filter((title): title is string => Boolean(title)));
   const mergedRows = new Map<string, SheetRow>();
@@ -122,7 +125,8 @@ async function readSheet(spreadsheetId: string, range: string) {
       const companyName = dataRow[identifierColumn]?.trim();
       if (!companyName) return;
       const key = normalizeSponsorName(companyName);
-      const merged = mergedRows.get(key) ?? { company_name: companyName, source_tabs: "" };
+      const merged = mergedRows.get(key);
+      if (!merged) return;
       headers.forEach((header, index) => {
         const value = dataRow[index]?.trim() ?? "";
         if (value && index !== identifierColumn) merged[`${tabName}.${normalizeHeader(header)}`] = value;
@@ -137,7 +141,7 @@ async function readSheet(spreadsheetId: string, range: string) {
 
 async function syncRows(client: SyncClient, rows: SheetRow[], eventConfig: EventConfig): Promise<SyncResult> {
   const result: SyncResult = { rows_read: rows.length, sponsors_synced: 0, tasks_created: 0, skipped: [] };
-  const { data: existingSponsors, error: sponsorsError } = await client.from("sponsors").select("id, company_name");
+  const { data: existingSponsors, error: sponsorsError } = await client.from("sponsors").select("id, company_name, contract_details");
   if (sponsorsError) throw sponsorsError;
   const sponsorByName = new Map((existingSponsors ?? []).map((sponsor) => [normalizeSponsorName(sponsor.company_name), sponsor]));
 
@@ -151,15 +155,20 @@ async function syncRows(client: SyncClient, rows: SheetRow[], eventConfig: Event
       result.skipped.push({ row: rowNumber, reason: "Missing company_name" });
       continue;
     }
-    const contractDetails = { ...row, source_row: rowNumber };
     const sponsorKey = normalizeSponsorName(companyName);
     const existingSponsor = sponsorByName.get(sponsorKey);
+    const approvedOptionKeys = ["approved_option_roundtable", "approved_option_tours", "approved_option_10_meetings"];
+    const preservedApprovedOptions = Object.fromEntries(approvedOptionKeys.flatMap((key) => {
+      const value = existingSponsor?.contract_details[key];
+      return value === undefined ? [] : [[key, value]];
+    }));
+    const contractDetails = { ...row, source_row: rowNumber, contract_roster: true, ...preservedApprovedOptions };
 
     const { data: sponsor, error: sponsorError } = existingSponsor
       ? await client.from("sponsors").update({ tier, contract_details: contractDetails }).eq("id", existingSponsor.id).select("id").single()
       : await client.from("sponsors").insert({ company_name: companyName, tier, contract_details: contractDetails }).select("id").single();
     if (sponsorError || !sponsor) throw sponsorError ?? new Error("Could not sync sponsor");
-    if (!existingSponsor) sponsorByName.set(sponsorKey, { id: sponsor.id, company_name: companyName });
+    if (!existingSponsor) sponsorByName.set(sponsorKey, { id: sponsor.id, company_name: companyName, contract_details: contractDetails });
 
     const { data: existingSponsorEvent, error: linkLookupError } = await client
       .from("sponsor_events")
@@ -174,7 +183,7 @@ async function syncRows(client: SyncClient, rows: SheetRow[], eventConfig: Event
       : await client.from("sponsor_events").insert({ sponsor_id: sponsor.id, event_id: eventId }).select("id").single();
     if (linkError || !sponsorEvent) throw linkError ?? new Error("Could not link sponsor to event");
 
-    const taskRows = getContractTasks(row).map((task) => ({ ...task, input_fields: [], input_values: {}, sponsor_event_id: sponsorEvent.id }));
+    const taskRows = getContractTasks(getContractRow(contractDetails)).map((task) => ({ ...task, input_fields: [], input_values: {}, sponsor_event_id: sponsorEvent.id }));
     if (taskRows.length) {
       for (const task of taskRows) {
         const { data: existingTask, error: taskLookupError } = await client
@@ -233,7 +242,7 @@ async function handle(request: Request) {
     for (const event of events) {
       const config = event as EventConfig;
       if (!config.google_sheet_id) continue;
-      const rows = await readSheet(config.google_sheet_id, config.google_sheet_range || "Sheet1!A:Z");
+      const rows = await readSheet(config.google_sheet_id);
       const result = await syncRows(client, rows, config);
       totals.rows_read += result.rows_read;
       totals.sponsors_synced += result.sponsors_synced;

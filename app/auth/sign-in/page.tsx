@@ -46,7 +46,7 @@ function SignInForm() {
 
   return (
     <main className="portal-shell auth-shell">
-      <header className="portal-header"><Link href="/" className="brand-mark"><span>PTC</span> / CONNECT</Link><span className="header-meta">SECURE ACCESS <span className="status-dot" /></span></header>
+      <header className="portal-header"><Link href="/" className="brand-mark"><span className="brand-word-proptech">PropTech</span> <span className="brand-word-connect">Connect</span></Link><span className="header-meta">SECURE ACCESS <span className="status-dot" /></span></header>
       <section className="auth-panel">
         <p className="eyebrow">{requestedRole === "admin" ? "Admin operations / sign in" : "Sponsor portal / sign in"}</p>
         <h1>Welcome<br /><em>back.</em></h1>
@@ -57,7 +57,7 @@ function SignInForm() {
           {error && <p className="auth-error" role="alert">{error}</p>}
           <button className="primary-button" disabled={loading} type="submit">{loading ? "Signing in..." : "Sign in"}<span>↗</span></button>
         </form>
-        <p className="auth-help">Need access? Ask the portal administrator to create your Supabase account.</p>
+        <p className="auth-help">Need access? Email client.success@proptechconnect.com to help you set up.</p>
       </section>
     </main>
   );

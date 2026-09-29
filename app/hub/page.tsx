@@ -94,7 +94,7 @@ export default function HubPage() {
   return (
     <main className="portal-shell">
       <header className="portal-header">
-        <Link href="/" className="brand-mark"><span>PTC</span> / CONNECT</Link>
+        <Link href="/" className="brand-mark"><span className="brand-word-proptech">PropTech</span> <span className="brand-word-connect">Connect</span></Link>
         <div className="header-actions"><div className="header-meta"><span className="status-dot" /> {role === "ADMIN" ? "Admin operations" : companyName}</div><SignOutButton /></div>
       </header>
       <section className="hub-intro">

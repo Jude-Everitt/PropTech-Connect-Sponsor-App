@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-browser";
+import { isGeneratedCopyTask, isObsoleteBrandingArtworkTask } from "@/lib/task-utils";
 import type { Event } from "@/lib/types";
 import SignOutButton from "@/app/ui/sign-out-button";
 
@@ -39,11 +40,11 @@ export default function AdminDashboardPage() {
       if (data?.length) {
         const { data: links } = await supabase.from("sponsor_events").select("id, event_id").in("event_id", data.map((event) => event.id));
         const { data: tasks } = links?.length
-          ? await supabase.from("tasks").select("sponsor_event_id, status").in("sponsor_event_id", links.map((link) => link.id))
+          ? await supabase.from("tasks").select("title, category, sponsor_event_id, status").in("sponsor_event_id", links.map((link) => link.id))
           : { data: [] };
         const eventByLink = new Map((links ?? []).map((link) => [link.id, link.event_id]));
         const nextProgress: Record<string, { complete: number; total: number; percentage: number }> = {};
-        (tasks ?? []).forEach((task) => {
+        (tasks ?? []).filter((task) => !isGeneratedCopyTask(task.title) && !isObsoleteBrandingArtworkTask(task.title, task.category)).forEach((task) => {
           const eventId = eventByLink.get(task.sponsor_event_id) ?? "";
           const current = nextProgress[eventId] ?? { complete: 0, total: 0, percentage: 0 };
           current.total += 1;
@@ -60,7 +61,7 @@ export default function AdminDashboardPage() {
 
   return (
     <main className="portal-shell">
-      <header className="portal-header"><Link href="/" className="brand-mark"><span>PTC</span> / CONNECT</Link><div className="header-actions"><div className="header-meta">ADMIN OPERATIONS <span className="status-dot" /></div><SignOutButton /></div></header>
+      <header className="portal-header"><Link href="/" className="brand-mark"><span className="brand-word-proptech">PropTech</span> <span className="brand-word-connect">Connect</span></Link><div className="header-actions"><div className="header-meta">ADMIN OPERATIONS <span className="status-dot" /></div><SignOutButton /></div></header>
       <section className="hub-intro"><p className="eyebrow">Admin dashboard</p><h1>Every sponsor.<br /><em>Every promise.</em></h1><p className="intro-copy">Select an event to monitor sponsor deliverables, contract commitments, and progress.</p></section>
       {message && <div className="empty-state error-state">{message}<div className="account-actions"><Link className="primary-button" href="/auth/sign-in?role=admin">Sign in as admin <span>↗</span></Link><button className="sync-button" onClick={() => void switchAccount()}>Switch account</button></div></div>}
       <section className="event-grid" aria-live="polite">

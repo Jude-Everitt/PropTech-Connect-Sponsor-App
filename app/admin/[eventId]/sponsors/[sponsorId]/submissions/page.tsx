@@ -57,5 +57,39 @@ export default function AdminSubmissionsPage({ params }: Props) {
     setReviewingTask(null);
   }
 
-  return <main className="portal-shell"><header className="portal-header"><Link href={`/admin/${eventId}/sponsors/${sponsorId}`} className="brand-mark"><span>PTC</span> / CONNECT</Link><div className="header-actions"><Link href={`/admin/${eventId}/sponsors/${sponsorId}`} className="back-link">← Roadmap</Link><SignOutButton /></div></header><section className="admin-hero"><div><p className="eyebrow">Awaiting review / {event?.name ?? "Event"}</p><h1>{sponsor?.company_name ?? "Sponsor"}</h1><p className="intro-copy">Review submitted details and files, then approve or request changes.</p></div></section>{message && <div className="notice">{message}</div>}<section className="admin-submissions-page">{tasks.map((task) => <article className="admin-submission-card" key={task.id}><div><p className="eyebrow">{task.category}</p><h2>{task.title}</h2><small>Submitted {task.submitted_at ? new Date(task.submitted_at).toLocaleString() : "recently"} · Quantity: {task.quantity}</small>{task.description && <details className="task-requirements"><summary>What this task requires</summary><p>{task.description}</p></details>}{task.response_text && <div className="submitted-input"><small>Submitted input</small><p>{task.response_text}</p></div>}{task.file_url && <a className="task-action-link" href={task.file_url} target="_blank" rel="noreferrer">Submitted file: {task.file_name ?? "Open file"} ↗</a>}</div><TaskSubmissionControls task={task} eventName={event?.name ?? "Event"} sponsorName={sponsor?.company_name ?? "Sponsor"} viewingAsAdmin onUpdated={(updated) => setTasks((current) => current.map((item) => item.id === updated.id ? { ...updated } : item))} /><div className="admin-review"><textarea value={reviewNotes[task.id] ?? ""} onChange={(event) => setReviewNotes((current) => ({ ...current, [task.id]: event.target.value }))} placeholder="Optional note, or explain requested changes" /><div className="task-actions"><button className="complete-button" disabled={reviewingTask === task.id} onClick={() => void reviewTask(task, "confirm")} type="button">Approve submission</button><button className="roadmap-toggle" disabled={reviewingTask === task.id} onClick={() => void reviewTask(task, "changes")} type="button">Request changes</button></div></div></article>)}{!message && !tasks.length && <div className="empty-state">No submissions are awaiting review.</div>}</section>{!message && <AdminUploadAttempts sponsorId={sponsorId} />}</main>;
+  return (
+    <main className="portal-shell">
+      <header className="portal-header">
+        <Link href={`/admin/${eventId}/sponsors/${sponsorId}`} className="brand-mark"><span className="brand-word-proptech">PropTech</span> <span className="brand-word-connect">Connect</span></Link>
+        <div className="header-actions"><Link href={`/admin/${eventId}/sponsors/${sponsorId}`} className="back-link">← Roadmap</Link><SignOutButton /></div>
+      </header>
+      <section className="admin-hero">
+        <div><p className="eyebrow">Awaiting review / {event?.name ?? "Event"}</p><h1>{sponsor?.company_name ?? "Sponsor"}</h1><p className="intro-copy">Review submitted details and files, then approve or request changes.</p></div>
+      </section>
+      {message && <div className="notice">{message}</div>}
+      <AdminUploadAttempts sponsorId={sponsorId} />
+      <section className="admin-submissions-page">
+        {tasks.map((task) => (
+          <article className="admin-submission-card" key={task.id}>
+            <div>
+              <p className="eyebrow">{task.category}</p>
+              <h2>{task.title}</h2>
+              <small>Submitted {task.submitted_at ? new Date(task.submitted_at).toLocaleString() : "recently"} · Quantity: {task.quantity}</small>
+              {task.response_text && <div className="submitted-input"><small>Submitted input</small><p>{task.response_text}</p></div>}
+              {task.file_url && <a className="task-action-link" href={task.file_url} target="_blank" rel="noreferrer">Submitted file: {task.file_name ?? "Open file"} ↗</a>}
+            </div>
+            <TaskSubmissionControls task={task} eventName={event?.name ?? "Event"} sponsorName={sponsor?.company_name ?? "Sponsor"} viewingAsAdmin onUpdated={(updated) => setTasks((current) => current.map((item) => item.id === updated.id ? { ...updated } : item))} />
+            <div className="admin-review">
+              <textarea value={reviewNotes[task.id] ?? ""} onChange={(event) => setReviewNotes((current) => ({ ...current, [task.id]: event.target.value }))} placeholder="Optional note, or explain requested changes" />
+              <div className="task-actions">
+                <button className="complete-button" disabled={reviewingTask === task.id} onClick={() => void reviewTask(task, "confirm")} type="button">Approve submission</button>
+                <button className="roadmap-toggle" disabled={reviewingTask === task.id} onClick={() => void reviewTask(task, "changes")} type="button">Request changes</button>
+              </div>
+            </div>
+          </article>
+        ))}
+        {!message && !tasks.length && <div className="empty-state">No submissions are awaiting review.</div>}
+      </section>
+    </main>
+  );
 }

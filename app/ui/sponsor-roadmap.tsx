@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase-browser";
-import { getContractRow, getContractTasks } from "@/lib/contract-tasks";
+import { getContractRow, getContractTasks, orderBoothTasks } from "@/lib/contract-tasks";
+import { splitSponsorContractDetails } from "@/lib/sponsor-contract-sections";
 import type { Event, Task, TaskStatus } from "@/lib/types";
 import SignOutButton from "@/app/ui/sign-out-button";
 import TaskSubmissionControls from "@/app/ui/task-submission-controls";
@@ -34,6 +35,9 @@ function statusLabel(status: TaskStatus) {
 
 function categoryLabel(category: string) {
   const value = category.toLowerCase();
+  if (value.includes("roundtable/meeting/tour options")) return "Roundtable/Meeting/Tour Options";
+  if (value.includes("private meeting room")) return "Private Meeting Room";
+  if (value.includes("10 meetings")) return "10 Meetings";
   if (value.includes("booth")) return "Booth";
   if (value.includes("panel")) return "Panels";
   if (value.includes("roundtable")) return "Roundtable";
@@ -57,7 +61,6 @@ export default function SponsorRoadmap({ eventId, sponsorId, viewingAsAdmin = fa
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
   const [savingTask, setSavingTask] = useState<string | null>(null);
-  const [savingBoothPosition, setSavingBoothPosition] = useState(false);
 
   useEffect(() => {
     async function loadRoadmap() {
@@ -118,7 +121,7 @@ export default function SponsorRoadmap({ eventId, sponsorId, viewingAsAdmin = fa
           ...task,
           category: entitlement.category,
           quantity: entitlement.quantity,
-          description: task.description ?? entitlement.description,
+          description: ["Confirm private meeting room", "Confirm 10 meetings"].includes(task.title) ? entitlement.description : task.description ?? entitlement.description,
           action_url: task.action_url ?? entitlement.action_url ?? null,
           action_label: task.action_label ?? entitlement.action_label ?? null,
         }] : [task];
@@ -132,11 +135,15 @@ export default function SponsorRoadmap({ eventId, sponsorId, viewingAsAdmin = fa
     void loadRoadmap();
   }, [eventId, sponsorId, viewingAsAdmin]);
 
-  const groups = useMemo(() => tasks.reduce<Record<string, EditableTask[]>>((result, task) => {
-    const category = categoryLabel(task.category);
-    (result[category] ??= []).push(task);
+  const groups = useMemo(() => {
+    const result = tasks.reduce<Record<string, EditableTask[]>>((groupsByCategory, task) => {
+      const category = categoryLabel(task.category);
+      (groupsByCategory[category] ??= []).push(task);
+      return groupsByCategory;
+    }, {});
+    if (result.Booth) result.Booth = orderBoothTasks(result.Booth);
     return result;
-  }, {}), [tasks]);
+  }, [tasks]);
   const complete = tasks.filter((task) => task.status === "Complete").length;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -144,6 +151,10 @@ export default function SponsorRoadmap({ eventId, sponsorId, viewingAsAdmin = fa
   const percentage = tasks.length ? Math.round((complete / tasks.length) * 100) : 0;
   const awaitingReview = tasks.filter((task) => task.status === "pending_review" || task.status === "With Our Team").length;
   const awaitingSponsor = tasks.filter((task) => task.status === "Needs You" && !(task.due_date && new Date(`${task.due_date}T00:00:00`) < today)).length;
+  const contractSections = splitSponsorContractDetails(sponsor?.contract_details ?? {});
+  const statusHref = (status: "awaiting-review" | "awaiting-sponsor" | "overdue") => viewingAsAdmin
+    ? `/admin/${eventId}/sponsors/${sponsorId}/status/${status}`
+    : `/sponsor/${eventId}/status/${status}`;
 
   async function saveTask(task: EditableTask, formData: FormData) {
     const title = String(formData.get("title") ?? "").trim();
@@ -194,26 +205,12 @@ export default function SponsorRoadmap({ eventId, sponsorId, viewingAsAdmin = fa
     setTasks((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
   }
 
-  async function saveBoothPosition(formData: FormData) {
-    if (!sponsor) return;
-    setSavingBoothPosition(true);
-    setMessage(null);
-    const contractDetails = {
-      ...sponsor.contract_details,
-      booth_position: String(formData.get("booth_position") ?? "").trim(),
-    };
-    const { error } = await supabase.from("sponsors").update({ contract_details: contractDetails }).eq("id", sponsor.id);
-    if (error) setMessage(error.message);
-    else setSponsor({ ...sponsor, contract_details: contractDetails });
-    setSavingBoothPosition(false);
-  }
-
   const homeHref = viewingAsAdmin ? `/admin/${eventId}/deliverables` : "/hub";
 
   return (
     <main className="portal-shell">
       <header className="portal-header">
-        <Link href={homeHref} className="brand-mark"><span>PTC</span> / CONNECT</Link>
+        <Link href={homeHref} className="brand-mark"><span className="brand-word-proptech">PropTech</span> <span className="brand-word-connect">Connect</span></Link>
         <div className="header-actions">
           <Link href={homeHref} className="back-link">{viewingAsAdmin ? "← Sponsors" : "← All events"}</Link>
           <SignOutButton />
@@ -233,9 +230,9 @@ export default function SponsorRoadmap({ eventId, sponsorId, viewingAsAdmin = fa
       </section>
       <section className="deliverable-status-summary" aria-label="Sponsor deliverable status summary">
         <strong>{complete} of {tasks.length} confirmed</strong>
-        <span>{awaitingReview} awaiting your review</span>
-        <span>{awaitingSponsor} awaiting the sponsor</span>
-        <span className={overdue > 0 ? "status-badge badge-danger" : ""}>{overdue} overdue</span>
+        {awaitingReview > 0 ? <Link href={statusHref("awaiting-review")}>{awaitingReview} awaiting your review</Link> : <span>0 awaiting your review</span>}
+        {awaitingSponsor > 0 ? <Link href={statusHref("awaiting-sponsor")}>{awaitingSponsor} awaiting the sponsor</Link> : <span>0 awaiting the sponsor</span>}
+        <Link className={overdue > 0 ? "status-badge badge-danger" : "status-summary-link"} href={statusHref("overdue")}>{overdue} overdue</Link>
       </section>
       {viewingAsAdmin && awaitingReview > 0 && sponsor && (
         <Link className="notice" href={`/admin/${eventId}/sponsors/${sponsor.id}/submissions`}>
@@ -243,26 +240,16 @@ export default function SponsorRoadmap({ eventId, sponsorId, viewingAsAdmin = fa
         </Link>
       )}
       {message && <div className="notice">{message}</div>}
-      {(sponsor && Object.entries(sponsor.contract_details).some(([key, value]) => key !== "source_row" && value) || viewingAsAdmin) && (
+      {(contractSections.accountDetails.length > 0 || contractSections.deliverables.length > 0 || viewingAsAdmin) && (
         <section className="contract-strip">
-          <p className="eyebrow">Campaign inputs</p>
-          <div className="contract-fields">
-            {Object.entries(sponsor?.contract_details ?? {}).filter(([key, value]) => key !== "source_row" && value).slice(0, 8).map(([key, value]) => (
-              <div key={key}><small>{key.replace(/_/g, " ")}</small><strong>{String(value)}</strong></div>
-            ))}
-          </div>
-          {viewingAsAdmin && sponsor && (
-            <form className="task-edit-form" action={(formData) => void saveBoothPosition(formData)}>
-              <label>Booth position<input name="booth_position" defaultValue={String(sponsor.contract_details.booth_position ?? "")} /></label>
-              <button className="sync-button" type="submit" disabled={savingBoothPosition}>{savingBoothPosition ? "Saving..." : "Save booth position"}</button>
-            </form>
-          )}
+          {contractSections.accountDetails.length > 0 && <section className="contract-subsection" aria-label="Account details"><p className="eyebrow">Account details</p><div className="contract-fields">{contractSections.accountDetails.map((field) => <div key={field.key}><small>{field.label}</small><strong>{field.value}</strong></div>)}</div></section>}
+          {contractSections.deliverables.length > 0 && <section className="contract-subsection" aria-label="Account deliverables"><p className="eyebrow">Account deliverables</p><div className="contract-fields">{contractSections.deliverables.map((field) => <div key={field.key}><small>{field.label}</small><strong>{field.value}</strong></div>)}</div></section>}
         </section>
       )}
       <section className="full-roadmap">
         {Object.entries(groups).map(([category, categoryTasks]) => (
           <div className="category-section" key={category}>
-            <div className="category-heading"><p className="eyebrow">Deliverables</p><h2>{category}</h2><span>{categoryTasks.length} tasks</span></div>
+            <div className="category-heading"><h2>{category}</h2><span>{categoryTasks.length} tasks</span></div>
             <div className="task-list">
               {categoryTasks.map((task) => (
                 <article className={`admin-task-accordion ${expandedTask === task.id ? "is-expanded" : ""}`} key={task.id}>
@@ -274,7 +261,6 @@ export default function SponsorRoadmap({ eventId, sponsorId, viewingAsAdmin = fa
                   </button>
                   {expandedTask === task.id && (
                     <div className="admin-task-detail">
-                      {task.description && <details className="task-requirements" open><summary>What this task requires</summary><p>{task.description}</p></details>}
                       {task.admin_review_note && <div className="review-note"><small>Admin review note</small><p>{task.admin_review_note}</p></div>}
                       <TaskSubmissionControls task={task} eventName={event?.name ?? "Event"} sponsorName={sponsor?.company_name ?? "Sponsor"} viewingAsAdmin={viewingAsAdmin} onUpdated={updateTask} />
                       {viewingAsAdmin && (

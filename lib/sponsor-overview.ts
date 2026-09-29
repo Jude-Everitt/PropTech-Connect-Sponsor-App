@@ -21,10 +21,13 @@ export type SponsorOverview = {
   categories: SponsorOverviewCategory[];
 };
 
-const categoryOrder = ["Booth", "Panels", "Roundtable", "Case study", "Branding", "Tickets", "Meetings", "Tours", "Workshops", "Innovation", "Networking"];
+const categoryOrder = ["Booth", "Panels", "Roundtable", "Case study", "Branding", "Tickets", "Private Meeting Room", "10 Meetings", "Roundtable/Meeting/Tour Options", "Meetings", "Tours", "Workshops", "Innovation", "Networking"];
 
 function normalizeCategory(category: string) {
   const value = category.toLowerCase();
+  if (value.includes("roundtable/meeting/tour options")) return "Roundtable/Meeting/Tour Options";
+  if (value.includes("private meeting room")) return "Private Meeting Room";
+  if (value.includes("10 meetings")) return "10 Meetings";
   if (value.includes("booth")) return "Booth";
   if (value.includes("panel")) return "Panels";
   if (value.includes("roundtable")) return "Roundtable";
@@ -54,7 +57,8 @@ function joinItems(items: string[]) {
   return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
 }
 
-function taskState(task: SponsorOverviewTask, today: Date): "confirmed" | "review" | "pending" | "overdue" {
+export function classifySponsorTask(task: SponsorOverviewTask, now = new Date()): "confirmed" | "review" | "pending" | "overdue" {
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   if (task.status === "Complete") return "confirmed";
   if (task.status === "pending_review" || task.status === "With Our Team") return "review";
   if (task.status === "Overdue") return "overdue";
@@ -117,7 +121,7 @@ export function buildSponsorOverview(tasks: SponsorOverviewTask[], eventStartDat
     const overdue: string[] = [];
     for (const task of categoryTasks) {
       const name = itemName(task);
-      const state = taskState(task, today);
+      const state = classifySponsorTask(task, today);
       if (state === "confirmed") confirmed.push(name);
       else if (state === "review") awaitingReview.push(name);
       else if (state === "overdue") overdue.push(name);

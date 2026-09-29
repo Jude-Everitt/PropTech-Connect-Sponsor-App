@@ -55,6 +55,11 @@ const freeTextSchema = (key: string, label: string, allowFile = false): TaskInpu
 
 const schemas: Record<string, TaskInputSchema> = {
   "Submit booth artwork": fileSchema,
+  "Submit Tier 1 Branding Artwork": fileSchema,
+  "Submit Tier 2 Branding Artwork": fileSchema,
+  "Submit Tier 3 Branding Artwork": fileSchema,
+  "Submit Tier 4 Branding Artwork": fileSchema,
+  "Submit Pillar Branding Artwork": fileSchema,
   "Submit artwork": fileSchema,
   "Submit pillar artwork": fileSchema,
   "Upload Headshot": fileSchema,
@@ -70,6 +75,8 @@ const schemas: Record<string, TaskInputSchema> = {
   },
   "Confirm booth requirement": readOnlySchema,
   "Confirm booth position": readOnlySchema,
+  "Confirm Displayed Company Name": freeTextSchema("displayed_company_name", "Displayed Company Name"),
+  "Note booth additional rentals": freeTextSchema("additional_rentals", "Additional rental requirements"),
   "Note booth activations": freeTextSchema("activation_details", "Activation details"),
   "Confirm team tickets": {
     sponsorEditable: true,
@@ -120,14 +127,21 @@ const schemas: Record<string, TaskInputSchema> = {
   },
   "Submit case study": {
     sponsorEditable: true,
-    allowFile: true,
+    allowFile: false,
     fields: [
-      { type: "textarea", key: "case_study_summary", label: "Case study summary", required: true },
-      { type: "textarea", key: "speaker_bio", label: "Case study speaker biography", required: true },
-      { type: "people", key: "speakers", label: "Case study speakers and contacts", personFields },
+      { type: "textarea", key: "case_study_title", label: "Case Study Title", required: true },
+      { type: "people", key: "speakers", label: "Sponsor Speaker", personFields },
+      { type: "people", key: "client_speakers", label: "Client Speaker", personFields },
     ],
   },
-  "Submit innovation details": freeTextSchema("innovation_details", "Innovation details", true),
+  "Submit innovation details": {
+    sponsorEditable: true,
+    allowFile: true,
+    fields: [
+      { type: "textarea", key: "innovation_details", label: "Innovation Presentation Title", required: true },
+      { type: "people", key: "innovation_speakers", label: "Sponsor Speaker", personFields },
+    ],
+  },
   "Confirm workshop details": {
     sponsorEditable: true,
     allowFile: true,
@@ -140,9 +154,9 @@ const schemas: Record<string, TaskInputSchema> = {
     ],
   },
   "Confirm private meeting room": {
-    sponsorEditable: true,
+    sponsorEditable: false,
     allowFile: false,
-    fields: [{ type: "select", key: "time_slot", label: "Preferred room slot", options: timeSlots, required: true }],
+    fields: [],
   },
   "Call Account Manager and Client Success to confirm option": {
     sponsorEditable: true,
@@ -155,9 +169,9 @@ const schemas: Record<string, TaskInputSchema> = {
     fields: [{ type: "select", key: "tour", label: "Tour", options: tourOptions, required: true }],
   },
   "Confirm 10 meetings": {
-    sponsorEditable: true,
+    sponsorEditable: false,
     allowFile: false,
-    fields: [{ type: "people", key: "meeting_contacts", label: "Meeting contacts", personFields }],
+    fields: [],
   },
   "Create company profile on the networking app": readOnlySchema,
 };
@@ -168,6 +182,10 @@ export function getTaskInputSchema(title: string, quantity = 1): TaskInputSchema
     ...configured,
     fields: configured.fields.map((field) => field.type === "ticket_nominees" ? { ...field, maxEntries: quantity } : field),
   };
+}
+
+export function supportsMultipleTaskFiles(title: string) {
+  return title.toLowerCase().includes("artwork");
 }
 
 export function validateTaskInputValues(schema: TaskInputSchema, values: Record<string, unknown>): string | null {

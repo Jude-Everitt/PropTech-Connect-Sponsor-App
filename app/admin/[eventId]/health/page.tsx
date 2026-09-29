@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { use, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase-browser";
+import { isGeneratedCopyTask, isObsoleteBrandingArtworkTask } from "@/lib/task-utils";
 import type { Event } from "@/lib/types";
 import SignOutButton from "@/app/ui/sign-out-button";
 
@@ -27,13 +28,13 @@ export default function EventHealthPage({ params }: Props) {
       }
       setEvent(eventData);
       if (!links?.length) return;
-      const { data: tasks, error: tasksError } = await supabase.from("tasks").select("category, status, due_date").in("sponsor_event_id", links.map((link) => link.id));
+      const { data: tasks, error: tasksError } = await supabase.from("tasks").select("title, category, status, due_date").in("sponsor_event_id", links.map((link) => link.id));
       if (tasksError) {
         setMessage(tasksError.message);
         return;
       }
       const grouped = new Map<string, HealthItem>();
-      (tasks ?? []).forEach((task) => {
+      (tasks ?? []).filter((task) => !isGeneratedCopyTask(task.title) && !isObsoleteBrandingArtworkTask(task.title, task.category)).forEach((task) => {
         const current = grouped.get(task.category) ?? { category: task.category, complete: 0, pendingReview: 0, total: 0, percentage: 0, overdue: 0 };
         current.total += 1;
         if (task.status === "Complete") current.complete += 1;
@@ -53,5 +54,5 @@ export default function EventHealthPage({ params }: Props) {
     return { total, complete, overdue, percentage: total ? Math.round((complete / total) * 100) : 0 };
   }, [health]);
 
-  return <main className="portal-shell"><header className="portal-header"><Link href={`/admin/${eventId}/deliverables`} className="brand-mark"><span>PTC</span> / CONNECT</Link><div className="header-actions"><Link href={`/admin/${eventId}/deliverables`} className="back-link">← Sponsors</Link><SignOutButton /></div></header><section className="admin-hero"><div><p className="eyebrow">Event health / {event?.name ?? "Loading event"}</p><h1>How healthy<br /><em>is the event?</em></h1><p className="intro-copy">A clear view of deliverable completion across every sponsor campaign.</p></div><div className="admin-metric"><strong>{overall.percentage}%</strong><small>{overall.complete} / {overall.total} tasks complete</small>{overall.overdue > 0 && <span className="status-badge badge-danger">{overall.overdue} overdue</span>}</div></section>{message && <div className="notice">{message}</div>}<section className="health-page-grid">{health.map((item) => <article className="health-page-card" key={item.category}><div><p className="eyebrow">Deliverable category</p><h2>{item.category}</h2></div><strong>{item.percentage}%</strong><div className="health-track"><span style={{ width: `${item.percentage}%` }} /></div><div className="health-page-meta"><span>{item.complete} of {item.total} complete</span>{item.pendingReview > 0 && <Link href={`/admin/${eventId}/deliverables`} className="status-badge badge-warning">{item.pendingReview} awaiting review</Link>}{item.overdue > 0 ? <span className="status-badge badge-danger">{item.overdue} overdue</span> : item.pendingReview === 0 && <span className="status-badge badge-success">On track</span>}</div></article>)}{!message && !health.length && <div className="empty-state">No deliverables have been synced for this event yet.</div>}</section></main>;
+  return <main className="portal-shell"><header className="portal-header"><Link href={`/admin/${eventId}/deliverables`} className="brand-mark"><span className="brand-word-proptech">PropTech</span> <span className="brand-word-connect">Connect</span></Link><div className="header-actions"><Link href={`/admin/${eventId}/deliverables`} className="back-link">← Sponsors</Link><SignOutButton /></div></header><section className="admin-hero"><div><p className="eyebrow">Event health / {event?.name ?? "Loading event"}</p><h1>How healthy<br /><em>is the event?</em></h1><p className="intro-copy">A clear view of deliverable completion across every sponsor campaign.</p></div><div className="admin-metric"><strong>{overall.percentage}%</strong><small>{overall.complete} / {overall.total} tasks complete</small>{overall.overdue > 0 && <span className="status-badge badge-danger">{overall.overdue} overdue</span>}</div></section>{message && <div className="notice">{message}</div>}<section className="health-page-grid">{health.map((item) => <article className="health-page-card" key={item.category}><div><p className="eyebrow">Deliverable category</p><h2>{item.category}</h2></div><strong>{item.percentage}%</strong><div className="health-track"><span style={{ width: `${item.percentage}%` }} /></div><div className="health-page-meta"><span>{item.complete} of {item.total} complete</span>{item.pendingReview > 0 && <Link href={`/admin/${eventId}/deliverables`} className="status-badge badge-warning">{item.pendingReview} awaiting review</Link>}{item.overdue > 0 ? <span className="status-badge badge-danger">{item.overdue} overdue</span> : item.pendingReview === 0 && <span className="status-badge badge-success">On track</span>}</div></article>)}{!message && !health.length && <div className="empty-state">No deliverables have been synced for this event yet.</div>}</section></main>;
 }
