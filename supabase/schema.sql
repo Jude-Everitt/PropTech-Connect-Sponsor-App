@@ -38,6 +38,16 @@ create table if not exists public.sponsor_events (
   unique (sponsor_id, event_id)
 );
 
+create table if not exists public.sponsor_campaign_contacts (
+  id uuid primary key default gen_random_uuid(),
+  sponsor_event_id uuid not null references public.sponsor_events(id) on delete cascade,
+  name text not null check (length(btrim(name)) > 0),
+  email text not null check (length(btrim(email)) > 0),
+  job_title text,
+  phone text,
+  created_at timestamptz not null default now()
+);
+
 alter table public.sponsor_events add column if not exists drive_folder_id text;
 
 create table if not exists public.drive_folder_creation_claims (
@@ -72,6 +82,7 @@ create table if not exists public.tasks (
   admin_review_note text,
   input_fields jsonb not null default '[]'::jsonb,
   input_values jsonb not null default '{}'::jsonb,
+  nominee_decisions jsonb not null default '{}'::jsonb,
   unique (sponsor_event_id, title)
 );
 
@@ -108,6 +119,7 @@ alter table public.tasks add column if not exists ai_reviewed_at timestamptz;
 alter table public.tasks add column if not exists admin_review_note text;
 alter table public.tasks add column if not exists input_fields jsonb not null default '[]'::jsonb;
 alter table public.tasks add column if not exists input_values jsonb not null default '{}'::jsonb;
+alter table public.tasks add column if not exists nominee_decisions jsonb not null default '{}'::jsonb;
 
 create index if not exists sponsor_events_event_id_idx on public.sponsor_events(event_id);
 create index if not exists tasks_sponsor_event_id_idx on public.tasks(sponsor_event_id);
@@ -122,15 +134,19 @@ alter table public.events enable row level security;
 alter table public.sponsors enable row level security;
 alter table public.user_profiles enable row level security;
 alter table public.sponsor_events enable row level security;
+alter table public.sponsor_campaign_contacts enable row level security;
 alter table public.tasks enable row level security;
 alter table public.task_upload_attempts enable row level security;
 alter table public.drive_folder_creation_claims enable row level security;
 
 grant usage on schema public to authenticated;
-grant select, insert, update, delete on public.events, public.sponsors, public.user_profiles, public.sponsor_events, public.tasks to authenticated;
+grant select, insert, update, delete on public.events, public.sponsors, public.user_profiles, public.sponsor_events to authenticated;
+grant select, insert, update, delete on public.sponsor_campaign_contacts to authenticated;
+grant select on public.tasks to authenticated;
 grant usage on schema public to service_role;
 grant select, insert, update, delete
 on public.events, public.sponsors, public.user_profiles, public.sponsor_events, public.tasks to service_role;
+grant select, insert, update, delete on public.sponsor_campaign_contacts to service_role;
 grant select, insert, update, delete on public.task_upload_attempts to service_role;
 grant select on public.task_upload_attempts to authenticated;
 grant select, insert, update, delete on public.drive_folder_creation_claims to service_role;
@@ -153,36 +169,18 @@ grant execute on function public.is_admin() to authenticated;
 
 drop policy if exists "Authenticated users can view events" on public.events;
 drop policy if exists "Admins and linked sponsors can view events" on public.events;
-create policy "Admins and linked sponsors can view events"
-  on public.events for select to authenticated
-  using (
-    public.is_admin()
-    or exists (
-      select 1
-      from public.sponsor_events se
-      join public.user_profiles up on up.sponsor_id = se.sponsor_id
-      where se.event_id = events.id
-        and up.id = (select auth.uid())
-        and up.role = 'SPONSOR'
-    )
-  );
+drop policy if exists "Admins can view events" on public.events;
+create policy "Admins can view events"
+  on public.events for select to authenticated using (public.is_admin());
 drop policy if exists "Admins can manage events" on public.events;
 create policy "Admins can manage events"
   on public.events for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
 drop policy if exists "Authenticated users can view sponsors" on public.sponsors;
 drop policy if exists "Admins and sponsors can view own sponsor" on public.sponsors;
-create policy "Admins and sponsors can view own sponsor"
-  on public.sponsors for select to authenticated
-  using (
-    public.is_admin()
-    or exists (
-      select 1 from public.user_profiles up
-      where up.id = (select auth.uid())
-        and up.role = 'SPONSOR'
-        and up.sponsor_id = sponsors.id
-    )
-  );
+drop policy if exists "Admins can view sponsors" on public.sponsors;
+create policy "Admins can view sponsors"
+  on public.sponsors for select to authenticated using (public.is_admin());
 drop policy if exists "Admins can manage sponsors" on public.sponsors;
 create policy "Admins can manage sponsors"
   on public.sponsors for all to authenticated using (public.is_admin()) with check (public.is_admin());
@@ -195,49 +193,30 @@ create policy "Admins can manage profiles"
   on public.user_profiles for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
 drop policy if exists "Users can view relevant sponsor events" on public.sponsor_events;
-create policy "Users can view relevant sponsor events"
-  on public.sponsor_events for select to authenticated
-  using (public.is_admin() or sponsor_id = (select sponsor_id from public.user_profiles where id = (select auth.uid())));
+drop policy if exists "Admins can view sponsor events" on public.sponsor_events;
+create policy "Admins can view sponsor events"
+  on public.sponsor_events for select to authenticated using (public.is_admin());
 drop policy if exists "Admins can manage sponsor events" on public.sponsor_events;
 create policy "Admins can manage sponsor events"
   on public.sponsor_events for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
+drop policy if exists "Sponsors and admins view campaign contacts" on public.sponsor_campaign_contacts;
+drop policy if exists "Admins view campaign contacts" on public.sponsor_campaign_contacts;
+create policy "Admins view campaign contacts"
+  on public.sponsor_campaign_contacts for select to authenticated using (public.is_admin());
+drop policy if exists "Sponsors and admins manage campaign contacts" on public.sponsor_campaign_contacts;
+drop policy if exists "Admins manage campaign contacts" on public.sponsor_campaign_contacts;
+create policy "Admins manage campaign contacts"
+  on public.sponsor_campaign_contacts for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
 drop policy if exists "Admins view and edit all tasks" on public.tasks;
 drop policy if exists "Admins view all tasks" on public.tasks;
-create policy "Admins view and edit all tasks"
-  on public.tasks for all to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "Admins view all tasks"
+  on public.tasks for select to authenticated using (public.is_admin());
 drop policy if exists "Sponsors view their tasks" on public.tasks;
 drop policy if exists "Sponsors view own tasks" on public.tasks;
-create policy "Sponsors view their tasks"
-  on public.tasks for select to authenticated
-  using (sponsor_event_id in (
-    select se.id from public.sponsor_events se
-    where se.sponsor_id = (select sponsor_id from public.user_profiles where id = (select auth.uid()))
-  ));
 drop policy if exists "Sponsors update their tasks" on public.tasks;
 drop policy if exists "Sponsors update their own submissions" on public.tasks;
-create policy "Sponsors update their own submissions"
-  on public.tasks for update to authenticated
-  using (
-    exists (
-      select 1
-      from public.sponsor_events se
-      join public.user_profiles up on up.sponsor_id = se.sponsor_id
-      where se.id = tasks.sponsor_event_id
-        and up.id = (select auth.uid())
-        and up.role = 'SPONSOR'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.sponsor_events se
-      join public.user_profiles up on up.sponsor_id = se.sponsor_id
-      where se.id = tasks.sponsor_event_id
-        and up.id = (select auth.uid())
-        and up.role = 'SPONSOR'
-    )
-  );
 
 drop policy if exists "Admins can view task upload attempts" on public.task_upload_attempts;
 create policy "Admins can view task upload attempts"
@@ -276,7 +255,7 @@ begin
     raise exception 'Sponsor submissions must enter pending review';
   end if;
 
-  if new.title in ('Confirm team tickets', 'Confirm RE tickets', 'Confirm VIP tickets', 'Confirm team ticket allocation', 'Confirm RE ticket allocation', 'Confirm VIP ticket allocation') then
+  if new.title in ('Issue Team Tickets', 'Issue Speaker Team Ticket', 'Issue RE Tickets', 'Confirm VIP Attendees', 'Confirm team tickets', 'Confirm RE tickets', 'Confirm VIP tickets', 'Confirm team ticket allocation', 'Confirm RE ticket allocation', 'Confirm VIP ticket allocation') then
     if jsonb_typeof(new.input_values -> 'nominees') is distinct from 'array' then
       raise exception 'Ticket nominees must be provided as a list';
     end if;
@@ -353,7 +332,7 @@ begin
     when '10 meetings' then
       target_key := '10_meetings';
       approved_key := 'approved_option_10_meetings';
-      target_title := 'Confirm 10 meetings';
+      target_title := 'Confirm 10 Private Meetings';
       target_category := '10 Meetings';
       target_description := '';
       target_action_url := null;

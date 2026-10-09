@@ -1,14 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-browser";
 
 function SignInForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const requestedRole = searchParams.get("role");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -29,18 +27,13 @@ function SignInForm() {
       ? await supabase.from("user_profiles").select("role").eq("id", userData.user.id).single()
       : { data: null, error: null };
     const normalizedRole = typeof profile?.role === "string" ? profile.role.trim().toUpperCase() : null;
-    if (requestedRole === "sponsor" && normalizedRole === "ADMIN") {
-      router.push("/admin");
-      router.refresh();
-      return;
-    }
-    if (requestedRole === "admin" && normalizedRole !== "ADMIN") {
+    if (normalizedRole !== "ADMIN") {
       await supabase.auth.signOut();
-      setError(profileError ? `Could not read your portal profile: ${profileError.message}` : "This account is not configured as an admin. Ask an administrator to set your profile role to ADMIN.");
+      setError(profileError ? `Could not read your admin profile: ${profileError.message}` : "This account is not configured for admin access.");
       setLoading(false);
       return;
     }
-    router.push(normalizedRole === "ADMIN" ? "/admin" : "/hub");
+    router.push("/admin");
     router.refresh();
   }
 
@@ -48,7 +41,7 @@ function SignInForm() {
     <main className="portal-shell auth-shell">
       <header className="portal-header"><Link href="/" className="brand-mark"><span className="brand-word-proptech">PropTech</span> <span className="brand-word-connect">Connect</span></Link><span className="header-meta">SECURE ACCESS <span className="status-dot" /></span></header>
       <section className="auth-panel">
-        <p className="eyebrow">{requestedRole === "admin" ? "Admin operations / sign in" : "Sponsor portal / sign in"}</p>
+        <p className="eyebrow">Admin operations / sign in</p>
         <h1>Welcome<br /><em>back.</em></h1>
         <p className="intro-copy">Use the email and password connected to your PropTech Connect account.</p>
         <form className="auth-form" onSubmit={handleSubmit}>
@@ -64,5 +57,5 @@ function SignInForm() {
 }
 
 export default function SignInPage() {
-  return <Suspense fallback={<main className="portal-shell auth-shell" />}><SignInForm /></Suspense>;
+  return <SignInForm />;
 }

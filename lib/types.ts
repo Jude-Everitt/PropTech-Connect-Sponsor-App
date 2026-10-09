@@ -23,9 +23,15 @@ export type Database = {
         Relationships: [];
       };
       sponsor_events: {
-        Row: { id: string; sponsor_id: string; event_id: string; drive_folder_id: string | null };
-        Insert: { id?: string; sponsor_id: string; event_id: string; drive_folder_id?: string | null };
-        Update: { id?: string; sponsor_id?: string; event_id?: string; drive_folder_id?: string | null };
+        Row: { id: string; sponsor_id: string; event_id: string; drive_folder_id: string | null; cvent_exhibitor_id: string | null };
+        Insert: { id?: string; sponsor_id: string; event_id: string; drive_folder_id?: string | null; cvent_exhibitor_id?: string | null };
+        Update: { id?: string; sponsor_id?: string; event_id?: string; drive_folder_id?: string | null; cvent_exhibitor_id?: string | null };
+        Relationships: [];
+      };
+      sponsor_campaign_contacts: {
+        Row: { id: string; sponsor_event_id: string; name: string; email: string; job_title: string | null; phone: string | null; created_at: string };
+        Insert: { id?: string; sponsor_event_id: string; name: string; email: string; job_title?: string | null; phone?: string | null; created_at?: string };
+        Update: { id?: string; sponsor_event_id?: string; name?: string; email?: string; job_title?: string | null; phone?: string | null; created_at?: string };
         Relationships: [];
       };
       tasks: {
@@ -52,6 +58,7 @@ export type Database = {
           admin_review_note: string | null;
           input_fields: Array<{ key: string; label: string; source_value: string }>;
           input_values: Record<string, unknown>;
+          nominee_decisions: Record<string, "approve" | "decline">;
         };
         Insert: {
           id?: string;
@@ -76,6 +83,7 @@ export type Database = {
           admin_review_note?: string | null;
           input_fields?: Array<{ key: string; label: string; source_value: string }>;
           input_values?: Record<string, unknown>;
+          nominee_decisions?: Record<string, "approve" | "decline">;
         };
         Update: {
           id?: string;
@@ -100,6 +108,7 @@ export type Database = {
           admin_review_note?: string | null;
           input_fields?: Array<{ key: string; label: string; source_value: string }>;
           input_values?: Record<string, unknown>;
+          nominee_decisions?: Record<string, "approve" | "decline">;
         };
         Relationships: [];
       };
@@ -149,6 +158,18 @@ export type Database = {
         Row: { id: string; event_id: string | null; sponsor_event_id: string | null; drive_folder_id: string | null; created_at: string };
         Insert: { id?: string; event_id?: string | null; sponsor_event_id?: string | null; drive_folder_id?: string | null; created_at?: string };
         Update: { id?: string; event_id?: string | null; sponsor_event_id?: string | null; drive_folder_id?: string | null; created_at?: string };
+        Relationships: [];
+      };
+      cvent_ticket_registrations: {
+        Row: { attendee_id: string; cvent_event_id: string; sponsor_event_id: string | null; exhibitor_id: string | null; exhibitor_name: string | null; inviting_sponsor: string | null; task_title: string; registration_type: string; status: string; first_name: string | null; last_name: string | null; email: string | null; company: string | null; job_title: string | null; registered_at: string | null; checked_in: boolean; synced_at: string };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      deliverable_due_dates: {
+        Row: { event_id: string; category: string; due_date: string; updated_at: string };
+        Insert: { event_id: string; category: string; due_date: string; updated_at?: string };
+        Update: { event_id?: string; category?: string; due_date?: string; updated_at?: string };
         Relationships: [];
       };
     };

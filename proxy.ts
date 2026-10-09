@@ -33,46 +33,23 @@ export async function proxy(request: NextRequest) {
   }
 
   const isAdminPath = request.nextUrl.pathname.startsWith("/admin");
+  const isRetiredSponsorPath = request.nextUrl.pathname.startsWith("/sponsor") || request.nextUrl.pathname.startsWith("/hub");
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) {
-    return redirect("/auth/sign-in", { role: isAdminPath ? "admin" : "sponsor" });
-  }
+  if (!isAdminPath && !isRetiredSponsorPath) return response;
+  if (isRetiredSponsorPath) return redirect("/admin");
+  if (!user) return redirect("/auth/sign-in", { role: "admin" });
 
   const { data: profile, error: profileError } = await supabase
     .from("user_profiles")
-    .select("role, sponsor_id")
+    .select("role")
     .eq("id", user.id)
     .maybeSingle();
 
-  if (isAdminPath) {
-    if (profileError || profile?.role !== "ADMIN") {
-      return redirect("/hub", { notice: "admin-required" });
-    }
-    return response;
-  }
-
-  if (profileError || profile?.role !== "SPONSOR") {
-    return redirect("/hub", { notice: "sponsor-required" });
-  }
-  if (!profile.sponsor_id) {
-    return redirect("/hub", { notice: "sponsor-unlinked" });
-  }
-
-  const eventId = request.nextUrl.pathname.split("/")[2];
-  const { data: sponsorEvent, error: sponsorEventError } = await supabase
-    .from("sponsor_events")
-    .select("id")
-    .eq("event_id", eventId)
-    .eq("sponsor_id", profile.sponsor_id)
-    .maybeSingle();
-  if (sponsorEventError || !sponsorEvent) {
-    return redirect("/hub", { notice: "event-unlinked" });
-  }
-
+  if (profileError || profile?.role !== "ADMIN") return redirect("/auth/sign-in", { role: "admin" });
   return response;
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/sponsor/:path*"],
+  matcher: ["/admin/:path*", "/sponsor/:path*", "/hub/:path*"],
 };

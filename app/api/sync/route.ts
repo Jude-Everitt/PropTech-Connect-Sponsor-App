@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { createSupabaseRequestClient } from "@/lib/supabase";
+import { companyBrandingTasks, networkingAppTasks } from "@/lib/contract-tasks";
 import type { Database, TaskStatus } from "@/lib/types";
 
 type SyncPayload = {
@@ -49,6 +51,12 @@ export async function POST(request: Request) {
   if (profileError || profile?.role !== "ADMIN") {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!serviceRoleKey || !supabaseUrl) {
+    return NextResponse.json({ error: "Admin sync requires service-role Supabase configuration" }, { status: 503 });
+  }
+  const writeClient = createClient<Database>(supabaseUrl, serviceRoleKey);
 
   let payload: SyncPayload;
   try {
@@ -73,7 +81,7 @@ export async function POST(request: Request) {
     company_name: companyName,
     tier,
   };
-  const { data: sponsorData, error: sponsorError } = await supabase
+  const { data: sponsorData, error: sponsorError } = await writeClient
     .from("sponsors")
     .upsert(sponsor, { onConflict: "company_name" })
     .select("id, company_name, tier")
@@ -83,7 +91,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: sponsorError?.message ?? "Could not create sponsor" }, { status: 500 });
   }
 
-  const { data: sponsorEvent, error: linkError } = await supabase
+  const { data: sponsorEvent, error: linkError } = await writeClient
     .from("sponsor_events")
     .upsert({ sponsor_id: sponsorData.id, event_id: eventId }, { onConflict: "sponsor_id,event_id" })
     .select("id")
@@ -102,7 +110,7 @@ export async function POST(request: Request) {
   );
 
   if (taskRows.length > 0) {
-    const { error: taskError } = await supabase
+    const { error: taskError } = await writeClient
       .from("tasks")
       .upsert(taskRows, { onConflict: "sponsor_event_id,title" });
     if (taskError) {
@@ -110,5 +118,16 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ sponsor: sponsorData, sponsor_event: sponsorEvent, tasks_created: taskRows.length });
+  const universalTaskRows = [...companyBrandingTasks, ...networkingAppTasks].map((task) => ({
+    ...task,
+    sponsor_event_id: sponsorEvent.id,
+    status: "Needs You" as TaskStatus,
+  }));
+  const { error: universalTaskError } = await writeClient.from("tasks").upsert(universalTaskRows, {
+    onConflict: "sponsor_event_id,title",
+    ignoreDuplicates: true,
+  });
+  if (universalTaskError) return NextResponse.json({ error: universalTaskError.message }, { status: 500 });
+
+  return NextResponse.json({ sponsor: sponsorData, sponsor_event: sponsorEvent, tasks_created: taskRows.length + universalTaskRows.length });
 }

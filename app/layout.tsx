@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PTC Connect | Sponsor Portal",
-  description: "The PropTech Connect sponsor deliverables portal",
+  title: "PTC Connect | Admin Operations",
+  description: "PropTech Connect company and task tracking for administrators",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

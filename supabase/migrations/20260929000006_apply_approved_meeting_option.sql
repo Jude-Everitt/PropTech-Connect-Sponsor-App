@@ -46,7 +46,7 @@ begin
     when '10 meetings' then
       target_key := '10_meetings';
       approved_key := 'approved_option_10_meetings';
-      target_title := 'Confirm 10 meetings';
+      target_title := 'Confirm 10 Private Meetings';
       target_category := '10 Meetings';
       target_description := '';
       target_action_url := null;

@@ -3,6 +3,10 @@
     {
       "path": "/api/sync/sheet",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/sync/cvent-tickets",
+      "schedule": "*/15 * * * *"
     }
   ]
 }
